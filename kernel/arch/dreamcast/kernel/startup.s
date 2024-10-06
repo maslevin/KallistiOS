@@ -236,4 +236,4 @@ ccr_addr:
 ccr_data:
 	.word	0x090d
 ccr_data_ocram:
-	.word	0x092d
+	.word	0x091d
