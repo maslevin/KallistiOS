@@ -168,6 +168,11 @@ static __always_inline void dcache_alloc_block(const void *src, uint32_t value) 
     );
 }
 
+void dcache_enable_ocindex();
+void dcache_disable_ocindex();
+void dcache_enable_ocram();
+void dcache_disable_ocram();
+
 /** @} */
 
 __END_DECLS

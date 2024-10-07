@@ -19,6 +19,14 @@
     .globl _dcache_purge_range
     .globl _dcache_purge_all
     .globl _dcache_purge_all_with_buffer
+    .globl _dcache_enable_ocram
+    .globl _dcache_disable_ocram
+    .globl _dcache_enable_ocindex
+    .globl _dcache_disable_ocindex
+    .globl _write_cache_control_register
+
+.set .ccr_OIX, 0x80
+.set .ccr_ORA, 0x20
 
 ! This routine goes through and flushes/invalidates the icache 
 ! for a given range.
@@ -246,6 +254,88 @@ _dcache_purge_all_with_buffer:
     rts
     nop
 
+_dcache_disable_ocram:
+    !Get existing CCR and clear ORA bit, then call write_cache_control_register
+    mov.l	.ccr_addr, r5
+    mov.l	@r5, r0
+    or	#.ccr_ORA, r0	!Set ORA bit...
+    bra	1f
+    xor	#.ccr_ORA, r0	!...then reverse the ORA bit to clear it    
+
+_dcache_enable_ocram:
+    !Get existing CCR and set ORA bit, then call write_cache_control_register
+    mov.l	.ccr_addr, r5
+    mov.l	@r5, r0
+    or	#.ccr_ORA, r0
+
+! this is adapted from TapamN's work which was posted on pastebin https://pastebin.com/uE2B7UiP
+
+!_dcache_disable_ocindex:
+    !Get existing CCR and clear OIX bit, then call write_cache_control_register
+!    mov.l	.ccr_addr, r5
+!    mov.l	@r5, r0
+!    or	#.ccr_OIX, r0	!Set OIX bit...
+!    bra	1f
+!    xor	#.ccr_OIX, r0	!...then reverse the OIX bit to clear it    
+
+!_dcache_enable_ocindex:
+!    !Get existing CCR and set OIX bit, then call write_cache_control_register
+!    mov.l	.ccr_addr, r5
+!    mov.l	@r5, r0
+!   or	#.ccr_OIX, r0
+
+1:
+    mov	r0, r4
+    !Fallthough to write_cache_control_register
+
+_write_cache_control_register:
+    mov.l	.ccr_addr, r5
+
+    !Block IRQs
+    mov.l	.block_bit, r0
+    stc	sr, r7
+    or	r7, r0
+    ldc	r0, sr
+
+    !Flush and invalidate data cache
+    mov.l	.loc_tags, r0
+    mov	#2, r1  ! 512 >> 8 = 2
+    shll8	r1
+    mov	#0, r2
+1:
+    mov.l	r2, @r0
+    dt	r1
+    add	#32, r0   ! cache_line_size is 32
+    bf	1b
+
+    !Jump to uncached P2 area before writing CCN
+    mova	1f, r0
+    mov	    #0xa0, r1
+    shll16	r1
+    shll8	r1
+    or	r1, r0
+    jmp	@r0
+    nop
+
+.align 2
+1:
+    !Write to CCR
+    mov.l	r4, @r5
+
+    !Can't touch cache for a while after writing CCR
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+
+    !Restore SR (unblock IRQs)
+    ldc	r7, sr
+    rts
+    nop
 
 ! Variables
     .align    2
@@ -285,5 +375,12 @@ align_mask:
     .long    ~31           ! Align address to 32-byte boundary
 cache_lines:
     .word    512           ! Total number of cache lines in dcache
-       
-
+.cache_line_size:
+    .word    32            ! The size of a single cache block in bytes
+.ccr_addr:
+    .long    0xff00001c    ! Cache control register
+.block_bit:
+    .long    0x10000000
+.loc_tags:
+    .long    0xf4000000
+    
