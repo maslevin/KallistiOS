@@ -14,7 +14,7 @@ int maple_enum_count(void) {
 
     for(cnt = 0, p = 0; p < MAPLE_PORT_COUNT; p++)
         for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
-            if(maple_state.ports[p].units[u].valid)
+            if(maple_dev_valid(p,u))
                 cnt++;
         }
 
@@ -23,10 +23,10 @@ int maple_enum_count(void) {
 
 /* Return a raw device info struct for the given device */
 maple_device_t * maple_enum_dev(int p, int u) {
-    if(maple_dev_valid(p, u))
-        return &maple_state.ports[p].units[u];
-    else
-        return NULL;
+    maple_device_t *rv = maple_state.ports[p].units[u];
+    if(rv && rv->valid)
+        return rv;
+    return NULL;
 }
 
 /* Return the Nth device of the requested type (where N is zero-indexed) */
@@ -111,6 +111,6 @@ void * maple_dev_status(maple_device_t *dev) {
         thd_pass();
 
     /* Cast and return the status buffer */
-    return (void *)(dev->status);
+    return dev->status;
 }
 

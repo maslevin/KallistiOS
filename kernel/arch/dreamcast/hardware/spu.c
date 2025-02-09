@@ -2,13 +2,15 @@
 
    spu.c
    Copyright (C) 2000, 2001 Megan Potter
-   Copyright (C) 2023 Ruslan Rostovtsev
+   Copyright (C) 2023, 2024 Ruslan Rostovtsev
  */
 
+#include <kos/thread.h>
 #include <dc/spu.h>
 #include <dc/g2bus.h>
 #include <dc/sq.h>
 #include <arch/timer.h>
+#include <errno.h>
 
 /*
 
@@ -62,7 +64,13 @@ void spu_memload(uintptr_t dst, void *src_void, size_t length) {
 
 void spu_memload_sq(uintptr_t dst, void *src_void, size_t length) {
     uint8_t *src = (uint8_t *)src_void;
-    int aligned_len;
+    size_t aligned_len;
+    g2_ctx_t ctx;
+
+    if(length < 32) {
+        spu_memload(dst, src_void, length);
+        return;
+    }
 
     /* Round up to the nearest multiple of 4 */
     if(length & 3) {
@@ -76,14 +84,71 @@ void spu_memload_sq(uintptr_t dst, void *src_void, size_t length) {
     /* Add in the SPU RAM base (cached area) */
     dst |= SPU_RAM_BASE;
 
+    /* Lock the SQs before disabling the interrupts. */
+    sq_lock(NULL);
+
+    /* Lock G2 bus because we can't suspend SQs from
+     * another thread with PIO access to G2 bus. */
+    ctx = g2_lock();
+
     /* Make sure the FIFOs are empty */
     g2_fifo_wait();
 
     sq_cpy((void *)dst, src, aligned_len);
 
+    /* We have some free time here to finish up the SQs work
+       before we unlock G2 and enable IRQ. So we'll unlock it first. */
+    sq_unlock();
+    sq_wait();
+
+    g2_unlock(ctx);
+
     if(length > 0) {
         /* Make sure the destination is in a non-cached area */
         dst |= MEM_AREA_P2_BASE;
+        dst += aligned_len;
+        src += aligned_len;
+        g2_fifo_wait();
+        g2_write_block_32((uint32_t *)src, dst, length >> 2);
+    }
+}
+
+void spu_memload_dma(uintptr_t dst, void *src_void, size_t length) {
+    uint8_t *src = (uint8_t *)src_void;
+    size_t aligned_len;
+
+    if(length < 32) {
+        spu_memload(dst, src_void, length);
+        return;
+    }
+    if(((uintptr_t)src_void) & 31) {
+        spu_memload_sq(dst, src_void, length);
+        return;
+    }
+
+    /* Round up to the nearest multiple of 4 */
+    if(length & 3) {
+        length = (length + 4) & ~3;
+    }
+
+    /* Using DMA (or SQ's on fail) for all that is divisible by 32 */
+    aligned_len = length & ~31;
+    length &= 31;
+
+    do {
+        if(spu_dma_transfer(src_void, dst, aligned_len, 1, NULL, NULL) < 0) {
+            if(errno == EINPROGRESS) {
+                thd_pass();
+                continue;
+            }
+            spu_memload_sq(dst, src_void, aligned_len);
+        }
+        break;
+    } while (1);
+
+    if(length > 0) {
+        /* Make sure the destination is in a non-cached area */
+        dst |= (MEM_AREA_P2_BASE | SPU_RAM_BASE);
         dst += aligned_len;
         src += aligned_len;
         g2_fifo_wait();
@@ -147,6 +212,7 @@ void spu_memset(uintptr_t dst, uint32_t what, size_t length) {
 
 void spu_memset_sq(uintptr_t dst, uint32_t what, size_t length) {
     int aligned_len;
+    g2_ctx_t ctx;
 
     /* Round up to the nearest multiple of 4 */
     if(length & 3) {
@@ -160,10 +226,24 @@ void spu_memset_sq(uintptr_t dst, uint32_t what, size_t length) {
     /* Add in the SPU RAM base (cached area) */
     dst |= SPU_RAM_BASE;
 
+    /* Lock the SQs before disabling the interrupts. */
+    sq_lock(NULL);
+
+    /* Lock G2 bus because we can't suspend SQs from
+     * another thread with PIO access to G2 bus. */
+    ctx = g2_lock();
+
     /* Make sure the FIFOs are empty */
     g2_fifo_wait();
 
     sq_set32((void *)dst, what, aligned_len);
+
+    /* We have some free time here to finish up the SQs work
+       before we unlock G2 and enable IRQ. So we'll unlock it first. */
+    sq_unlock();
+    sq_wait();
+
+    g2_unlock(ctx);
 
     if(length > 0) {
         /* Make sure the destination is in a non-cached area */
@@ -175,18 +255,23 @@ void spu_memset_sq(uintptr_t dst, uint32_t what, size_t length) {
 /* Reset the AICA channel registers */
 void spu_reset_chans(void) {
     int i;
+    g2_ctx_t ctx;
+
+    ctx = g2_lock();
     g2_fifo_wait();
-    g2_write_32(SNDREGADDR(0x2800), 0);
+
+    g2_write_32_raw(SNDREGADDR(0x2800), 0);
 
     for(i = 0; i < 64; i++) {
-        if(!(i % 4)) g2_fifo_wait();
+        if((i & 3) == 0) g2_fifo_wait();
 
-        g2_write_32(CHNREGADDR(i, 0), 0x8000);
-        g2_write_32(CHNREGADDR(i, 20), 0x1f);
+        g2_write_32_raw(CHNREGADDR(i, 0), 0x8000);
+        g2_write_32_raw(CHNREGADDR(i, 20), 0x1f);
     }
 
     g2_fifo_wait();
-    g2_write_32(SNDREGADDR(0x2800), 0x000f);
+    g2_write_32_raw(SNDREGADDR(0x2800), 0x000f);
+    g2_unlock(ctx);
 }
 
 /* Enable/disable the SPU; note that disable implies reset of the

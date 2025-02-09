@@ -516,6 +516,7 @@ kthread_t *thd_create_ex(const kthread_attr_t *restrict attr,
             /* Set Thread Pointer */
             nt->context.gbr = (uint32_t)nt->tcbhead;
             nt->tid = tid;
+            nt->real_prio = real_attr.prio;
             nt->prio = real_attr.prio;
             nt->state = STATE_READY;
 
@@ -627,6 +628,7 @@ int thd_set_prio(kthread_t *thd, prio_t prio) {
 
     /* Set the new priority */
     thd->prio = prio;
+    thd->real_prio = prio;
     return 0;
 }
 

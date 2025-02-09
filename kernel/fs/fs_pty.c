@@ -62,8 +62,6 @@ typedef struct ptyhalf {
 
     mutex_t     mutex;
     condvar_t   ready_read, ready_write;
-
-    struct termios termios;
 } ptyhalf_t;
 
 /* Our global pty list */
@@ -154,10 +152,6 @@ int fs_pty_create(char *buffer, int maxbuflen, file_t *master_out, file_t *slave
 
     /* Reset their refcnts (these will get increased in a minute) */
     master->refcnt = slave->refcnt = 0;
-
-    /* Initialize the termios structures with default values */
-    memset(&master->termios, 0, sizeof(struct termios));
-    memset(&slave->termios, 0, sizeof(struct termios));
 
     /* Allocate a mutex for each for multiple readers or writers */
     mutex_init(&master->mutex, MUTEX_TYPE_NORMAL);
@@ -679,31 +673,63 @@ static dirent_t * pty_readdir(void * h) {
     return &dl->dirent;
 }
 
-static int pty_ioctl(void *h, int cmd, va_list ap) {
-    pipefd_t *fd = (pipefd_t *)h;
-    ptyhalf_t *ph = fd->d.p;
-    void *arg = va_arg(ap, void*);
+static int pty_stat(vfs_handler_t *vfs, const char *path, struct stat *st,
+                    int flag) {
+    ptyhalf_t *ph;
+    int id;
+    int master;
+    size_t len = strlen(path);
 
-    if (!fd || fd->type != PF_PTY) {
-        errno = EBADF;
+    (void)vfs;
+    (void)flag;
+
+    /* Root directory '/pty' */
+    if(len == 0 || (len == 1 && *path == '/')) {
+        memset(st, 0, sizeof(struct stat));
+        st->st_dev = (dev_t)('p' | ('t' << 8) | ('y' << 16));
+        st->st_mode = S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO;
+        st->st_size = -1;
+        st->st_nlink = 2;
+
+        return 0;
+    }
+
+    /* Handle paths that start directly with '/maXX' or '/slXX' */
+    if(sscanf(path, "/%2c%02x", (char[3]){}, &id) != 2) {
+        errno = ENOENT;
         return -1;
     }
 
-    switch (cmd) {
-        case TIOCGETA:
-            if(arg == NULL) {
-                errno = EINVAL;
-                return -1;
-            }
-            memcpy(arg, &ph->termios, sizeof(struct termios));
-            return 0;
+    /* Check if it's a master (ma) or slave (sl) */
+    master = (path[0] == 'm' && path[1] == 'a');
 
-        /* Add other ioctl cases here */
-
-        default:
-            errno = ENOTTY;
-            return -1;
+    /* Find the corresponding PTY half */
+    mutex_lock(&list_mutex);
+    LIST_FOREACH(ph, &ptys, list) {
+        if(ph->id == id) break;
     }
+    mutex_unlock(&list_mutex);
+
+    /* If PTY is not found, return error */
+    if(!ph) {
+        errno = ENOENT;
+        return -1;
+    }
+
+    /* If the file requested doesn't match the master/slave role, switch */
+    if(master != ph->master) {
+        ph = ph->other;
+    }
+
+    /* Fill in the stat structure */
+    memset(st, 0, sizeof(struct stat));
+    st->st_dev = (dev_t)('p' | ('t' << 8) | ('y' << 16));
+    st->st_mode = S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
+    st->st_nlink = 1;
+    st->st_size = ph->cnt;
+    st->st_blksize = PTY_BUFFER_SIZE;
+
+    return 0;
 }
 
 static int pty_fcntl(void *h, int cmd, va_list ap) {
@@ -769,18 +795,12 @@ static int pty_fstat(void *h, struct stat *st) {
     }
 
     memset(st, 0, sizeof(struct stat));
-
     st->st_dev = (dev_t)('p' | ('t' << 8) | ('y' << 16));
-
-    if(fd->mode & O_DIR) {
-        st->st_mode = S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO;
-    }
-    else {
-        st->st_mode = S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP |
-            S_IROTH | S_IWOTH;
-        st->st_size = (off_t)fd->d.p->cnt;
-        st->st_blksize = 1;
-    }
+    st->st_mode = (fd->mode & O_DIR) ? 
+        (S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO) : 
+        (S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
+    st->st_size = (fd->mode & O_DIR) ? -1 : (off_t)fd->d.p->cnt;
+    st->st_blksize = (fd->mode & O_DIR) ? 0 : 1;
 
     return 0;
 }
@@ -806,12 +826,12 @@ static vfs_handler_t vh = {
     NULL,
     pty_total,
     pty_readdir,
-    pty_ioctl,
     NULL,
     NULL,
     NULL,
     NULL,
     NULL,
+    pty_stat,
     NULL,
     NULL,
     pty_fcntl,

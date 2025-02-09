@@ -53,39 +53,63 @@ int maple_driver_attach(maple_frame_t *det) {
     maple_driver_t      *i;
     maple_response_t    *resp;
     maple_devinfo_t     *devinfo;
-    maple_device_t      *dev;
-    int         attached;
+    maple_device_t      *dev = maple_state.ports[det->dst_port].units[det->dst_unit];
+    bool                attached = false;
 
     /* Resolve some pointers first */
     resp = (maple_response_t *)det->recv_buf;
     devinfo = (maple_devinfo_t *)resp->data;
-    attached = 0;
-    dev = &maple_state.ports[det->dst_port].units[det->dst_unit];
-    memcpy(&dev->info, devinfo, sizeof(maple_devinfo_t));
-    memset(dev->status, 0, sizeof(dev->status));
-    dev->drv = NULL;
 
     /* Go through the list and look for a matching driver */
     LIST_FOREACH(i, &maple_state.driver_list, drv_list) {
         /* For now we just pick the first matching driver */
         if(i->functions & devinfo->functions) {
-            /* Driver matches, try an attach if we need to */
-            if(!(i->attach) || (i->attach(i, dev) >= 0)) {
-                /* Success: make it permanent */
-                attached = 1;
-                break;
+
+            /* Driver matches. Alloc a device if needed. */
+            if(!dev) {
+                dev = calloc(1, sizeof(*dev));
+                if(!dev)
+                    return 1;
+
+                maple_state.ports[det->dst_port].units[det->dst_unit] = dev;
+
+                /* Add the basics for the initial version of the struct */
+                dev->port = det->dst_port;
+                dev->unit = det->dst_unit;
+                dev->frame.state = MAPLE_FRAME_VACANT;
+            }
+
+            memcpy(&dev->info, devinfo, sizeof(maple_devinfo_t));
+
+            /* Now lets allocate a new status buffer */
+            if(i->status_size && !dev->status) {
+                dev->status = calloc(1, i->status_size);
+                if(!dev->status)
+                    return 1;
+            }
+
+            if(!i->status_size || dev->status) {
+                /* Try to attach if we need to then break out. */
+                if(!(i->attach) || (i->attach(i, dev) >= 0)) {
+                    attached = true;
+                    break;
+                }
             }
         }
     }
 
     /* Did we get any hits? */
-    if(!attached)
+    if(!attached) {
+        free(dev->status);
+        dev->status = NULL;
+
         return -1;
+    }
 
     /* Finish setting stuff up */
     dev->drv = i;
     dev->status_valid = 0;
-    dev->valid = 1;
+    dev->valid = true;
 
     if(!(attach_callback_functions) || (dev->info.functions & attach_callback_functions)) {
         if(attach_callback) {
@@ -98,17 +122,16 @@ int maple_driver_attach(maple_frame_t *det) {
 
 /* Detach an attached maple device */
 int maple_driver_detach(int p, int u) {
-    maple_device_t  *dev;
+    maple_device_t *dev = maple_enum_dev(p, u);
 
-    dev = &maple_state.ports[p].units[u];
-
-    if(!dev->valid)
+    if(!dev)
         return -1;
+
+    dev->valid = false;
 
     if(dev->drv && dev->drv->detach)
         dev->drv->detach(dev->drv, dev);
 
-    dev->valid = 0;
     dev->status_valid = 0;
 
     if(!(detach_callback_functions) || (dev->info.functions & detach_callback_functions)) {
@@ -116,6 +139,14 @@ int maple_driver_detach(int p, int u) {
             detach_callback(dev);
         }
     }
+
+    if(dev->drv->status_size) {
+        free(dev->status);
+        dev->status = NULL;
+    }
+
+    dev->probe_mask = 0;
+    dev->dev_mask = 0;
 
     return 0;
 }
@@ -127,11 +158,9 @@ int maple_driver_foreach(maple_driver_t *drv, int (*callback)(maple_device_t *))
 
     for(p = 0; p < MAPLE_PORT_COUNT; p++) {
         for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
-            dev = &maple_state.ports[p].units[u];
+            dev = maple_enum_dev(p, u);
 
-            if(!dev->valid) continue;
-
-            if(dev->drv == drv && !dev->frame.queued)
+            if(dev && dev->drv == drv && !dev->frame.queued)
                 if(callback(dev) < 0)
                     return -1;
         }

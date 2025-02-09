@@ -39,6 +39,7 @@
 #include <sys/cdefs.h>
 __BEGIN_DECLS
 
+#include <stdbool.h>
 #include <arch/types.h>
 #include <sys/queue.h>
 
@@ -269,18 +270,21 @@ typedef struct maple_response {
 */
 typedef struct maple_device {
     /* Public */
-    int             valid;  /**< \brief Is this a valid device? */
+    bool            valid;  /**< \brief Is this a valid device? */
     int             port;   /**< \brief Maple bus port connected to */
     int             unit;   /**< \brief Unit number, off of the port */
     maple_devinfo_t info;   /**< \brief Device info struct */
 
     /* Private */
-    int                     dev_mask;       /**< \brief Device-present mask for unit 0's */
     maple_frame_t           frame;          /**< \brief One rx/tx frame */
     struct maple_driver     *drv;           /**< \brief Driver which handles this device */
 
-    volatile int            status_valid;   /**< \brief Have we got our first status update? */
-    uint8                   status[1024];   /**< \brief Status buffer (for pollable devices) */
+    uint8                   probe_mask;     /**< \brief Mask of sub-devices left to probe */
+    uint8                   dev_mask;       /**< \brief Device-present mask for unit 0's */
+
+    volatile uint8          status_valid;   /**< \brief Have we got our first status update? */
+
+    void                    *status;        /**< \brief Status buffer (for pollable devices) */
 } maple_device_t;
 
 #define MAPLE_PORT_COUNT    4   /**< \brief Number of ports on the bus */
@@ -296,7 +300,7 @@ typedef struct maple_device {
 */
 typedef struct maple_port {
     int             port;                       /**< \brief Port ID */
-    maple_device_t  units[MAPLE_UNIT_COUNT];    /**< \brief Pointers to active units */
+    maple_device_t *units[MAPLE_UNIT_COUNT];    /**< \brief Pointers to active units */
 } maple_port_t;
 
 /** \brief   A maple device driver.
@@ -316,6 +320,8 @@ typedef struct maple_driver {
 
     uint32      functions;  /**< \brief One or more MAPLE_FUNCs ORed together */
     const char  *name;      /**< \brief The driver name */
+
+    size_t      status_size;/**< \brief The size of the status buffer */
 
     /* Callbacks, to be filled in by the driver */
 
@@ -381,13 +387,10 @@ typedef struct maple_state_str {
     volatile int                dma_in_progress;
 
     /** \brief  Next port that will be auto-detected */
-    int                         detect_port_next;
+    uint8                       detect_port_next;
 
-    /** \brief  Next unit which will be auto-detected */
-    int                         detect_unit_next;
-
-    /** \brief  Did the detect wrap? */
-    volatile int                detect_wrapped;
+    /** \brief  Mask of ports that completed the initial scan */
+    volatile uint8              scan_ready_mask;
 
     /** \brief  Our vblank handler handle */
     int                         vbl_handle;
@@ -684,6 +687,7 @@ int maple_driver_unreg(maple_driver_t *driver);
     \ingroup maple
 
     \param  det             The detection frame.
+    \retval 1               Couldn't allocate buffers.
     \retval 0               On success.
     \retval -1              If no driver is available.
 */
