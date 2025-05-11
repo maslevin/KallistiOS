@@ -27,8 +27,8 @@ printf goes to the dc-tool console
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
 #include <sys/queue.h>
 
 /* A linked list of dir entries. */
@@ -288,6 +288,12 @@ static dirent_t *dcload_readdir(void * h) {
         rv->attr = 0; /* what the hell is attr supposed to be anyways? */
 
         fn = malloc(strlen(entry->path) + strlen(dcld->d_name) + 1);
+
+        if(!fn) {
+            errno = ENOMEM;
+            return NULL;
+        }
+
         strcpy(fn, entry->path);
         strcat(fn, dcld->d_name);
 

@@ -53,21 +53,22 @@ struct bmp_dib_header {
 };
 
 /* CRC calculation: calculates the CRC on a VMU file to be written out */
-static int vmu_pkg_crc(const uint8 * buf, int size) {
-    int i, c, n;
+static uint16_t vmu_pkg_crc(const uint8_t *buf, size_t size) {
+    size_t i;
+    uint16_t c, n;
 
     for(i = 0, n = 0; i < size; i++) {
         n ^= (buf[i] << 8);
 
         for(c = 0; c < 8; c++) {
             if(n & 0x8000)
-                n = (n << 1) ^ 4129;
+                n = (n << 1) ^ 0x1021;
             else
                 n = (n << 1);
         }
     }
 
-    return n & 0xffff;
+    return n;
 }
 
 static int vmu_eyecatch_size(int eyecatch_type) {
@@ -85,12 +86,14 @@ static int vmu_eyecatch_size(int eyecatch_type) {
     }
 }
 
-/* Converts a vmu_pkg_t structure into an array of uint8's which may be
+/* Converts a vmu_pkg_t structure into an array of uint8_t's which may be
    written to a VMU file via fs_vmu, or whatever. */
-int vmu_pkg_build(vmu_pkg_t *src, uint8 ** dst, int * dst_size) {
-    uint8       *out;
-    int     ec_size, out_size;
+int vmu_pkg_build(vmu_pkg_t *src, uint8_t **dst, int *dst_size) {
+    uint8_t     *out;
+    int         ec_size, out_size;
     vmu_hdr_t   *hdr;
+
+    assert(src && dst);
 
     /* First off, figure out how big it will be */
     out_size = sizeof(vmu_hdr_t) + 512 * src->icon_cnt + src->data_len;
@@ -99,10 +102,15 @@ int vmu_pkg_build(vmu_pkg_t *src, uint8 ** dst, int * dst_size) {
     if(ec_size < 0) return -1;
 
     out_size += ec_size;
-    *dst_size = out_size;
 
     /* Allocate a return array */
-    out = *dst = malloc(out_size);
+    out = malloc(out_size);
+
+    if(!out) return -1;
+
+    /* We're done so write outputs */
+    *dst_size = out_size;
+    *dst = out;
 
     /* Setup some defaults */
     memset(out, 0, out_size);
@@ -141,12 +149,14 @@ int vmu_pkg_build(vmu_pkg_t *src, uint8 ** dst, int * dst_size) {
     return 0;
 }
 
-/* Parse an array of uint8's (i.e. a VMU data file) into a
+/* Parse an array of uint8_t's (i.e. a VMU data file) into a
  * vmu_pkg_t package structure. */
-int vmu_pkg_parse(uint8 *data, vmu_pkg_t *pkg) {
-    uint16 crc, crc_save;
+int vmu_pkg_parse(uint8_t *data, size_t data_size, vmu_pkg_t *pkg) {
+    uint16_t crc, crc_save;
     int ec_size, hdr_size, total_size, icon_size;
     vmu_hdr_t *hdr;
+
+    assert(data && pkg);
 
     hdr = (vmu_hdr_t *)data;
 
@@ -154,6 +164,11 @@ int vmu_pkg_parse(uint8 *data, vmu_pkg_t *pkg) {
     ec_size = vmu_eyecatch_size(hdr->eyecatch_type);
     hdr_size = sizeof(vmu_hdr_t) + icon_size + ec_size;
     total_size = hdr->data_len + hdr_size;
+
+    if(total_size < 0 || (size_t)total_size > data_size) {
+        dbglog(DBG_ERROR, "vmu_pkg_parse: file header is corrupted, or no header?\n");
+        return -1;
+    }
 
     /* Verify the CRC.  Note: this writes a zero byte into data[].
      * The byte is later restored in case data is an mmapped pointer to a
