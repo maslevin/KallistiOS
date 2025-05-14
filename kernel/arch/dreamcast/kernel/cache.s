@@ -266,23 +266,25 @@ _dcache_enable_ocram:
     !Get existing CCR and set ORA bit, then call write_cache_control_register
     mov.l	.ccr_addr, r5
     mov.l	@r5, r0
-    or	#.ccr_ORA, r0
+    bra 1f
+    or	#.ccr_ORA, r0   !Set ORA bit on the way out
 
 ! this is adapted from TapamN's work which was posted on pastebin https://pastebin.com/uE2B7UiP
 
-!_dcache_disable_ocindex:
+_dcache_disable_ocindex:
     !Get existing CCR and clear OIX bit, then call write_cache_control_register
-!    mov.l	.ccr_addr, r5
-!    mov.l	@r5, r0
-!    or	#.ccr_OIX, r0	!Set OIX bit...
-!    bra	1f
-!    xor	#.ccr_OIX, r0	!...then reverse the OIX bit to clear it    
+    mov.l	.ccr_addr, r5
+    mov.l	@r5, r0
+    or	#.ccr_OIX, r0	!Set OIX bit...
+    bra	1f
+    xor	#.ccr_OIX, r0	!...then reverse the OIX bit to clear it    
 
-!_dcache_enable_ocindex:
-!    !Get existing CCR and set OIX bit, then call write_cache_control_register
-!    mov.l	.ccr_addr, r5
-!    mov.l	@r5, r0
-!   or	#.ccr_OIX, r0
+_dcache_enable_ocindex:
+    !Get existing CCR and set OIX bit, then call write_cache_control_register
+    mov.l	.ccr_addr, r5
+    mov.l	@r5, r0
+    or	#.ccr_OIX, r0
+    !intentional fallthrough to cache control register write
 
 1:
     mov	r0, r4
