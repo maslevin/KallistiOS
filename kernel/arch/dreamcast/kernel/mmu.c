@@ -715,7 +715,7 @@ static void initial_page_write(irq_t source, irq_context_t *context, void *data)
 
 static const unsigned int page_mask[] = { 0x3ff, 0xfff, 0xffff, 0xfffff };
 
-int mmu_page_map_static(uintptr_t virt, uintptr_t phys,
+unsigned int mmu_page_map_static(uintptr_t virt, uintptr_t phys,
                         page_size_t page_size,
                         page_prot_t page_prot,
                         bool cached)
@@ -723,7 +723,7 @@ int mmu_page_map_static(uintptr_t virt, uintptr_t phys,
     unsigned int head;
 
     if(virt & phys & page_mask[page_size])
-        return -1;
+        return 0xffffffff;
 
     irq_disable_scoped();
 
@@ -735,7 +735,7 @@ int mmu_page_map_static(uintptr_t virt, uintptr_t phys,
 
     tlb_nb_static++;
 
-    return 0;
+    return head;
 }
 
 void mmu_init_basic(void) {
@@ -814,4 +814,19 @@ void mmu_set_sq_addr(void *addr) {
     /* Reset the base target address for the SQs */
     *(uint32_t *)(MEM_AREA_UTLB_DATA_ARRAY1_BASE + (0x3e << 8)) = ppn1 | 0x1fc;
     *(uint32_t *)(MEM_AREA_UTLB_DATA_ARRAY1_BASE + (0x3f << 8)) = ppn2 | 0x1fc;
+}
+
+/**
+ * @brief PPN address masks, indexed by the ordinal value of page_size_t
+ * 
+ */
+const uint32_t PPN_ADDRESS_MASKS[] = {0x1ffffe00, 0x1ffff800, 0x1fff8000, 0x1ff00000};
+
+void mmu_remap_tlb_entry(unsigned int page_handle, void* addr, page_size_t page_size) {
+    printf("REMAPPING PAGE HANDLE [0x%02x] to address [0x%08x]\n", page_handle, addr);
+    uint32_t ppn = ((uint32_t)addr & PPN_ADDRESS_MASKS[page_size]);
+    printf("PPN: [0x%08x]\n");
+    uint32_t* entry_ptr = (uint32_t*)(MEM_AREA_ITLB_DATA_ARRAY1_BASE + (page_handle << 8));
+    *entry_ptr = ppn | (*entry_ptr & 0x000001ff);
+//    *entry_ptr = ppn | 0x0fc;
 }

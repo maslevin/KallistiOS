@@ -364,11 +364,11 @@ mmu_mapfunc_t mmu_map_set_callback(mmu_mapfunc_t newfunc);
     \param  page_prot       The memory protection usef for that mapping.
     \param  cached          True if the mapped memory area is cached,
                             false otherwise.
-    \retval 0               On success.
-    \retval -1              When the virtual or physical addresses are not
+    \retval page_handle     On success.
+    \retval 0xffffffff      When the virtual or physical addresses are not
                             aligned to the page size.
 */
-int mmu_page_map_static(uintptr_t virt, uintptr_t phys,
+unsigned int mmu_page_map_static(uintptr_t virt, uintptr_t phys,
                         page_size_t page_size,
                         page_prot_t page_prot,
                         bool cached);
@@ -429,6 +429,15 @@ bool mmu_enabled(void);
  *
  *  \param  addr            The base address to reset to */
 void mmu_set_sq_addr(void *addr);
+
+/** \brief Take a static UTLB entry and remap the target physical address which it points to without changing any other attributes of the page
+ *  \ingroup mmu
+ * 
+ *  \param page_handle should be a byte between 0x3d and 0x00, 0x3e and 0x3f are reserved for remapping the SQ's so don't touch those!
+ *  \param addr the address you want the UTLB entry to point to
+ *  \param page_size the page size enumeration value so that we know how to mask addr into a ppn entry
+ */
+void mmu_remap_tlb_entry(unsigned int page_handle, void* addr, page_size_t page_size);
 
 __END_DECLS
 
