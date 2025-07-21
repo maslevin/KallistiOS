@@ -14,10 +14,10 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
-#include <malloc.h>
 
 #include <sys/queue.h>
 #include <sys/ioctl.h>
+#include <kos/dbglog.h>
 #include <kos/fs.h>
 #include <arch/irq.h>
 #include <dc/spu.h>
@@ -88,18 +88,18 @@ void snd_sfx_unload(sfxhnd_t idx) {
     free(t);
 }
 
-typedef struct __attribute__((__packed__)) {
+typedef struct {
     uint8_t riff[4];
     int32_t totalsize;
     uint8_t riff_format[4];
 } wavmagic_t;
 
-typedef struct __attribute__((__packed__)) {
+typedef struct {
     uint8_t id[4];
     size_t size;
 } chunkhdr_t;
 
-typedef struct __attribute__((__packed__)) {
+typedef struct {
     int16_t format;
     int16_t channels;
     int32_t sample_rate;
@@ -109,7 +109,7 @@ typedef struct __attribute__((__packed__)) {
 } fmthdr_t;
 
 /* WAV header */
-typedef struct __attribute__((__packed__)) {
+typedef struct {
     wavmagic_t magic;
 
     chunkhdr_t chunk;
@@ -220,7 +220,7 @@ static int read_wav_header_buf(char *buf, wavhdr_t *wavhdr, size_t *bufidx) {
 
 static uint8_t *read_wav_data(file_t fd, wavhdr_t *wavhdr) {
     /* Allocate memory for WAV data */
-    uint8_t *wav_data = memalign(32, wavhdr->chunk.size);
+    uint8_t *wav_data = aligned_alloc(32, wavhdr->chunk.size);
 
     if(wav_data == NULL)
         return NULL;
@@ -240,7 +240,7 @@ static uint8_t *read_wav_data_buf(char *buf, wavhdr_t *wavhdr, size_t *bufidx) {
     size_t tmp_bufidx = *bufidx;
 
     /* Allocate memory for WAV data */
-    uint8_t *wav_data = memalign(32, wavhdr->chunk.size);
+    uint8_t *wav_data = aligned_alloc(32, wavhdr->chunk.size);
 
     if(wav_data == NULL)
         return NULL;
@@ -313,12 +313,12 @@ static snd_effect_t *create_snd_effect(wavhdr_t *wavhdr, uint8_t *wav_data) {
     }
     else if(channels == 2 && fmt == WAVE_FMT_PCM && bitsize == 8) {
         /* Stereo 8-bit PCM */
-        uint32_t *left_buf = memalign(32, len / 2), *right_buf;
+        uint32_t *left_buf = aligned_alloc(32, len / 2), *right_buf;
 
         if(left_buf == NULL)
             goto err_occurred;
 
-        right_buf = memalign(32, len / 2);
+        right_buf = aligned_alloc(32, len / 2);
         if(right_buf == NULL) {
             free(left_buf);
             goto err_occurred;
@@ -337,7 +337,7 @@ static snd_effect_t *create_snd_effect(wavhdr_t *wavhdr, uint8_t *wav_data) {
         int ownmem = 0;
 
         if(((uintptr_t)right_buf) & 3) {
-            right_buf = (uint8_t *)memalign(32, len / 2);
+            right_buf = (uint8_t *)aligned_alloc(32, len / 2);
 
             if(right_buf == NULL)
                 goto err_occurred;
@@ -354,12 +354,12 @@ static snd_effect_t *create_snd_effect(wavhdr_t *wavhdr, uint8_t *wav_data) {
     }
     else if(channels == 2 && fmt == WAVE_FMT_YAMAHA_ADPCM) {
         /* Stereo Yamaha ADPCM (channels are interleaved) */
-        uint32_t *left_buf = (uint32_t *)memalign(32, len / 2), *right_buf;
+        uint32_t *left_buf = (uint32_t *)aligned_alloc(32, len / 2), *right_buf;
 
         if(left_buf == NULL)
             goto err_occurred;
 
-        right_buf = (uint32_t *)memalign(32, len / 2);
+        right_buf = (uint32_t *)aligned_alloc(32, len / 2);
 
         if(right_buf == NULL) {
             free(left_buf);
@@ -519,7 +519,7 @@ sfxhnd_t snd_sfx_load_fd(file_t fd, size_t len, uint32_t rate, uint16_t bitsize,
     }
     */
     if(read_len > 0) {
-        tmp_buff = memalign(32, read_len);
+        tmp_buff = aligned_alloc(32, read_len);
 
         if(fs_read(fd, tmp_buff, read_len) <= 0) {
             goto err_occurred;
@@ -677,7 +677,7 @@ sfxhnd_t snd_sfx_load_raw_buf(char *buf, size_t len, uint32_t rate, uint16_t bit
 
     read_len = chan_len;
     if(read_len > 0) {
-        tmp_buff = memalign(32, read_len);
+        tmp_buff = aligned_alloc(32, read_len);
         memcpy(tmp_buff, buf, read_len);
         bufidx += read_len;
 
@@ -771,7 +771,7 @@ int snd_sfx_play_ex(sfx_play_data_t *data) {
         }
     }
 
-    int size;
+    uint32_t size;
     snd_effect_t *t = (snd_effect_t *)data->idx;
     AICA_CMDSTR_CHANNEL(tmp, cmd, chan);
 
@@ -790,7 +790,7 @@ int snd_sfx_play_ex(sfx_play_data_t *data) {
     chan->loop = data->loop;
     chan->loopstart = data->loopstart;
     chan->loopend = data->loopend ? data->loopend : size;
-    chan->freq = data->freq > 0 ? data->freq : t->rate;
+    chan->freq = data->freq > 0 ? (uint32_t)data->freq : t->rate;
     chan->vol = data->vol;
 
     if(!t->stereo) {

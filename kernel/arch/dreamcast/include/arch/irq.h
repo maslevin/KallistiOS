@@ -1,13 +1,13 @@
 /* KallistiOS ##version##
 
-   arch/dreamcast/include/irq.h
+   arch/dreamcast/include/arch/irq.h
    Copyright (C) 2000-2001 Megan Potter
    Copyright (C) 2024 Paul Cercueil
    Copyright (C) 2024 Falco Girgis
 
 */
 
-/** \file
+/** \file    arch/irq.h
     \brief   Interrupt and exception handling.
     \ingroup irqs
 
@@ -31,11 +31,6 @@
 #include <stdint.h>
 #include <sys/cdefs.h>
 __BEGIN_DECLS
-
-#include <arch/types.h>
-
-/* Included for legacy compatibility with these two APIs being one. */
-#include <arch/trap.h>
 
 /** \defgroup irqs  Interrupts
     \brief          IRQs and ISRs for the SH4's CPU
@@ -62,7 +57,7 @@ __BEGIN_DECLS
     @{
 */
 
-/** \defgroup Context
+/** \defgroup irq_context Context
     \brief Thread execution state and accessors
 
     This API includes the structure and accessors for a
@@ -107,6 +102,9 @@ typedef __attribute__((aligned(32))) struct irq_context {
     uint32_t  r[16];      /**< 16 general purpose (integer) registers */
     uint32_t  fpscr;      /**< Floating-point status/control register */
 } irq_context_t;
+
+/* Included for legacy compatibility with these two APIs being one. */
+#include <arch/trap.h>
 
 /** \name Register Accessors
     \brief Convenience macros for accessing context registers
@@ -439,7 +437,7 @@ typedef struct irq_cb {
     Passing a NULL value for hnd will remove the current handler, if any.
 
     \param  code            The IRQ type to set the handler for
-                            (see \ref irq_exception_codes).
+                            (see #irq_t).
     \param  hnd             A pointer to a procedure to handle the exception.
     \param  data            A pointer that will be passed along to the callback.
     
@@ -482,7 +480,7 @@ irq_cb_t irq_get_handler(irq_t code);
     \retval 0               On success (no error conditions defined).
 
 */
-int irq_set_global_handler(irq_handler handler, void *data);
+int irq_set_global_handler(irq_handler hnd, void *data);
 
 /** Get the global exception handler.
 
@@ -512,12 +510,12 @@ int irq_init(void);
 */
 void irq_shutdown(void);
 
-static inline void __irq_scoped_cleanup(int *state) {
+static inline void __irq_scoped_cleanup(irq_mask_t *state) {
     irq_restore(*state);
 }
 
 #define ___irq_disable_scoped(l) \
-    int __scoped_irq_##l __attribute__((cleanup(__irq_scoped_cleanup))) = irq_disable()
+    irq_mask_t __scoped_irq_##l __attribute__((cleanup(__irq_scoped_cleanup))) = irq_disable()
 
 #define __irq_disable_scoped(l) ___irq_disable_scoped(l)
 /** \endcond */

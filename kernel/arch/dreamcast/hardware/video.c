@@ -10,6 +10,7 @@
 #include <dc/video.h>
 #include <dc/pvr.h>
 #include <dc/sq.h>
+#include <kos/dbglog.h>
 #include <kos/platform.h>
 #include <string.h>
 #include <stdio.h>
@@ -599,4 +600,15 @@ void vid_init(int disp_mode, vid_pixel_mode_t pixel_mode) {
 void vid_shutdown(void) {
     /* Reset back to default mode, in case we're going back to a loader. */
     vid_init(DM_640x480, PM_RGB565);
+}
+
+void vid_set_dithering(bool enable) {
+    uint32_t cfg = vid_bpp_to_pvr_cfg2[currmode.pm];
+
+    if(enable)
+        cfg |= PVR_PM_DITHER;
+    else
+        cfg &= ~PVR_PM_DITHER;
+
+    PVR_SET(PVR_FB_CFG_2, cfg);
 }

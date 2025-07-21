@@ -3,7 +3,7 @@
    arch/dreamcast/kernel/irq.c
    Copyright (C) 2000-2001 Megan Potter
    Copyright (C) 2024 Paul Cercueil
-   Copyright (C) 2024 Falco Girgis
+   Copyright (C) 2024, 2025 Falco Girgis
    Copyright (C) 2024 Andy Barajas
 */
 
@@ -18,6 +18,7 @@
 #include <arch/timer.h>
 #include <arch/stack.h>
 #include <kos/dbgio.h>
+#include <kos/dbglog.h>
 #include <kos/thread.h>
 #include <kos/library.h>
 #include <kos/regfield.h>
@@ -61,6 +62,8 @@ int irq_set_handler(irq_t code, irq_handler hnd, void *data) {
         return -1;
 
     code >>= 5;
+
+    irq_disable_scoped();
     irq_handlers[code] = (struct irq_cb){ hnd, data };
 
     return 0;
@@ -74,11 +77,14 @@ irq_cb_t irq_get_handler(irq_t code) {
 
     code >>= 5;
 
+    irq_disable_scoped();
     return irq_handlers[code];
 }
 
 /* Set a global handler */
 int irq_set_global_handler(irq_handler hnd, void *data) {
+    irq_disable_scoped();
+
     global_irq_handler.hdl = hnd;
     global_irq_handler.data = data;
     return 0;
@@ -86,17 +92,23 @@ int irq_set_global_handler(irq_handler hnd, void *data) {
 
 /* Get the global exception handler */
 irq_cb_t irq_get_global_handler(void) {
+    irq_disable_scoped();
+
     return global_irq_handler;
 }
 
 /* Set or remove a trapa handler */
 int trapa_set_handler(trapa_t code, trapa_handler hnd, void *data) {
+    irq_disable_scoped();
+
     trapa_handlers[code] = (struct trapa_cb){ hnd, data };
     return 0;
 }
 
 /* Get a particular trapa handler */
 trapa_handler trapa_get_handler(trapa_t code, void **data) {
+    irq_disable_scoped();
+
     if(data)
         *data = trapa_handlers[code].data;
 
@@ -141,8 +153,9 @@ static char *irq_exception_string(irq_t evt) {
 
 /* Print a kernel panic reg dump */
 extern irq_context_t *irq_srt_addr;
-static void irq_dump_regs(int code, irq_t evt) {
+void irq_dump_regs(int code, irq_t evt) {
     uint32_t fp;
+    uint32_t ret_addr;
     uint32_t *regs = irq_srt_addr->r;
     bool valid_pc;
     bool valid_pr;
@@ -173,23 +186,21 @@ static void irq_dump_regs(int code, irq_t evt) {
             if(valid_pr)
                 dbglog(DBG_DEAD, " %08lx", irq_srt_addr->pr);
 
-#ifdef FRAME_POINTERS
-            while(fp != 0xffffffff) {
+            while(__is_defined(FRAME_POINTERS) && fp != 0xffffffff) {
                 /* Validate the function pointer (fp) */
                 if((fp & 3) || (fp < 0x8c000000) || (fp > _arch_mem_top))
                     break;
 
                 /* Get the return address from the function pointer */
-                fp = arch_fptr_ret_addr(fp);
+                ret_addr = arch_fptr_ret_addr(fp);
 
                 /* Validate the return address */
-                if(!arch_valid_text_address(fp))
+                if(!arch_valid_text_address(ret_addr))
                     break;
 
-                dbglog(DBG_DEAD, " %08lx", fp);
+                dbglog(DBG_DEAD, " %08lx", ret_addr);
                 fp = arch_fptr_next(fp);
             }
-#endif
         }
 
         dbglog(DBG_DEAD, "\n");
