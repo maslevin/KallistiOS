@@ -264,10 +264,6 @@ void pvr_blank_polyhdr_buf(int type, pvr_poly_hdr_t * poly) {
 
     /* Put in the list type */
     poly->cmd = FIELD_PREP(PVR_TA_CMD_TYPE, type) | 0x80840012;
-
-    /* Fill in dummy values */
-    poly->d1 = poly->d2 = poly->d3 = poly->d4 = 0xffffffff;
-
 }
 
 pvr_ptr_t pvr_get_front_buffer(void) {
@@ -281,9 +277,9 @@ pvr_ptr_t pvr_get_front_buffer(void) {
        view target, aka. the one not currently being displayed. */
     idx = pvr_state.view_target ^ pvr_state.render_completed;
 
-    addr = pvr_state.frame_buffers[idx].frame;
+    addr = pvr_state.frame_buffers[idx].frame & (PVR_RAM_SIZE - 1);
 
     /* The front buffer is in 32-bit memory, convert its address to make it
        addressable from the 64-bit memory */
-    return (pvr_ptr_t)(((addr << 1) & (PVR_RAM_SIZE - 1)) + PVR_RAM_BASE);
+    return (pvr_ptr_t)(addr * 2 + PVR_RAM_BASE);
 }

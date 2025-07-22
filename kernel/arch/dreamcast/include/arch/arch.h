@@ -79,6 +79,11 @@ extern char _etext;
 static const
 unsigned HZ __depr("Please use the new THD_SCHED_HZ macro.") = THD_SCHED_HZ;
 
+#ifndef THD_STACK_ALIGNMENT
+/** \brief  Required alignment for stack. */
+#define THD_STACK_ALIGNMENT 8
+#endif
+
 #ifndef THD_STACK_SIZE
 /** \brief  Default thread stack size. */
 #define THD_STACK_SIZE  32768
@@ -367,7 +372,7 @@ static inline void arch_sleep(void) {
 
     \return                 The return address of the current function.
 */
-static inline uintptr_t arch_get_ret_addr(void) {
+static __always_inline uintptr_t arch_get_ret_addr(void) {
     uintptr_t pr;
 
     __asm__ __volatile__("sts pr,%0\n" : "=r"(pr));
@@ -386,7 +391,7 @@ static inline uintptr_t arch_get_ret_addr(void) {
     \return                 The frame pointer from the current function.
     \note                   This only works if you don't disable frame pointers.
 */
-static inline uintptr_t arch_get_fptr(void) {
+static __always_inline uintptr_t arch_get_fptr(void) {
     register uintptr_t fp __asm__("r14");
 
     return fp;

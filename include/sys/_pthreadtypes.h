@@ -8,6 +8,9 @@
 #ifndef __SYS_PTHREADTYPES_H
 #define __SYS_PTHREADTYPES_H
 
+#include <sys/cdefs.h>
+__BEGIN_DECLS
+
 typedef unsigned long int pthread_t;
 
 typedef struct pthread_mutexattr_t {
@@ -17,6 +20,7 @@ typedef struct pthread_mutexattr_t {
 
 typedef struct pthread_rwlockattr_t {
     /* Empty */
+    char _unused;
 } pthread_rwlockattr_t;
 
 #ifndef __PTHREAD_HAVE_CONDATTR_TYPE
@@ -33,6 +37,7 @@ typedef union pthread_condattr_t {
 
 typedef struct pthread_barrierattr_t {
     /* Empty */
+    char _unused;
 } pthread_barrierattr_t;
 
 /* The following types have no public elements. Their implementation is hidden
@@ -97,5 +102,7 @@ typedef union pthread_barrier_t {
 
 #undef __PTHREAD_BARRIER_SIZE
 #endif /* !__PTHREAD_HAVE_BARRIER_TYPE */
+
+__END_DECLS
 
 #endif /* !__SYS_PTHREADTYPES_H */

@@ -7,10 +7,10 @@
    Copyright (C) 2023, 2024 Falco Girgis
 */
 
-#include <stdlib.h>
 #include <assert.h>
 #include <string.h>
 #include <malloc.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -20,6 +20,7 @@
 
 #include <kos/thread.h>
 #include <kos/dbgio.h>
+#include <kos/dbglog.h>
 #include <kos/sem.h>
 #include <kos/rwsem.h>
 #include <kos/cond.h>
@@ -44,8 +45,8 @@ also using their queue library verbatim (sys/queue.h).
 */
 
 /* Builtin background thread data */
-static alignas(8) uint8_t thd_reaper_stack[512];
-static alignas(8) uint8_t thd_idle_stack[64];
+static alignas(THD_STACK_ALIGNMENT) uint8_t thd_reaper_stack[512];
+static alignas(THD_STACK_ALIGNMENT) uint8_t thd_idle_stack[64];
 
 /*****************************************************************************/
 /* Thread scheduler data */
@@ -403,7 +404,8 @@ kthread_t *thd_create_ex(const kthread_attr_t *restrict attr,
 
             /* Create a new thread stack */
             if(!real_attr.stack_ptr) {
-                nt->stack = (uint32_t*)malloc(real_attr.stack_size);
+                nt->stack = (uint32_t*)aligned_alloc(THD_STACK_ALIGNMENT,
+                                                     real_attr.stack_size);
 
                 if(!nt->stack) {
                     free(nt);
@@ -591,7 +593,7 @@ static inline void thd_schedule_inner(kthread_t *thd) {
 
     /* Make sure the thread hasn't underrun its stack */
     if(thd_current->stack && thd_current->stack_size) {
-        if(CONTEXT_SP(thd_current->context) < (ptr_t)(thd_current->stack)) {
+        if(CONTEXT_SP(thd_current->context) < (uintptr_t)(thd_current->stack)) {
             thd_pslist(printf);
             thd_pslist_queue(printf);
             assert_msg(0, "Thread stack underrun");
