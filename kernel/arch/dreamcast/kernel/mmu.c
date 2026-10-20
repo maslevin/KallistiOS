@@ -807,26 +807,54 @@ bool mmu_enabled(void) {
     return *mmucr & 0x1;
 }
 
+/* Reloads static UTLB entry 'entry' with a new data value through LDTLB (MMUCR.URC selects the entry, PTEH
+   keeps its virtual page and ASID), like mmu_page_map_static does. Writing the memory mapped UTLB arrays
+   directly from cached code was followed by stray 8 byte writes into RAM. */
+static void mmu_reload_utlb_entry(unsigned int entry, uint32_t ptelv) {
+    uint32_t ptehv, old_mmucr;
+
+    irq_disable_scoped();
+
+    ptehv = *(volatile uint32_t *)(MEM_AREA_UTLB_ADDRESS_ARRAY_BASE | (entry << 8)) & 0xfffffcff;
+    old_mmucr = *mmucr;
+    *mmucr = (old_mmucr & ~(63 << 10)) | ((entry & 63) << 10);
+    mmu_ldtlb_quick(ptehv, ptelv);
+    mmu_ldtlb_wait();
+    *mmucr = old_mmucr;
+}
+
 void mmu_set_sq_addr(void *addr) {
     uint32_t ppn1 = (uint32_t)addr & 0x1ff00000;
     uint32_t ppn2 = ppn1 + 0x00100000;
 
     /* Reset the base target address for the SQs */
-    *(uint32_t *)(MEM_AREA_UTLB_DATA_ARRAY1_BASE + (0x3e << 8)) = ppn1 | 0x1fc;
-    *(uint32_t *)(MEM_AREA_UTLB_DATA_ARRAY1_BASE + (0x3f << 8)) = ppn2 | 0x1fc;
+    mmu_reload_utlb_entry(0x3e, ppn1 | 0x1fc);
+    mmu_reload_utlb_entry(0x3f, ppn2 | 0x1fc);
 }
 
 /**
  * @brief PPN address masks, indexed by the ordinal value of page_size_t
  * 
  */
-const uint32_t PPN_ADDRESS_MASKS[] = {0x1ffffe00, 0x1ffff800, 0x1fff8000, 0x1ff00000};
+/* Physical page number masks for 1 KB, 4 KB, 64 KB and 1 MB pages */
+const uint32_t PPN_ADDRESS_MASKS[] = {0x1ffffc00, 0x1ffff000, 0x1fff0000, 0x1ff00000};
 
+/* Changes the physical page of a static UTLB entry (a handle from mmu_page_map_static) in place, keeping its
+   virtual page, ASID and other attributes. The entry is reloaded the architected way, like mmu_page_map_static
+   does: MMUCR.URC selects it and LDTLB writes PTEH / PTEL. (Writing the memory mapped UTLB arrays directly, even
+   from P2 with interrupts off, was followed by stray 8 byte writes of the TLB values into RAM.) */
 void mmu_remap_tlb_entry(unsigned int page_handle, void* addr, page_size_t page_size) {
-    printf("REMAPPING PAGE HANDLE [0x%02x] to address [0x%08x]\n", page_handle, addr);
-    uint32_t ppn = ((uint32_t)addr & PPN_ADDRESS_MASKS[page_size]);
-    printf("PPN: [0x%08x]\n");
-    uint32_t* entry_ptr = (uint32_t*)(MEM_AREA_ITLB_DATA_ARRAY1_BASE + (page_handle << 8));
-    *entry_ptr = ppn | (*entry_ptr & 0x000001ff);
-//    *entry_ptr = ppn | 0x0fc;
+    uint32_t ppn = (uint32_t)addr & PPN_ADDRESS_MASKS[page_size];
+    uint32_t ptehv, ptelv, old_mmucr;
+
+    irq_disable_scoped();
+
+    ptehv = *(volatile uint32_t *)(MEM_AREA_UTLB_ADDRESS_ARRAY_BASE | (page_handle << 8)) & 0xfffffcff;
+    ptelv = (*(volatile uint32_t *)(MEM_AREA_UTLB_DATA_ARRAY1_BASE | (page_handle << 8)) & ~0x1ffffc00) | ppn;
+
+    old_mmucr = *mmucr;
+    *mmucr = (old_mmucr & ~(63 << 10)) | ((page_handle & 63) << 10);
+    mmu_ldtlb_quick(ptehv, ptelv);
+    mmu_ldtlb_wait();
+    *mmucr = old_mmucr;
 }
