@@ -236,10 +236,18 @@ _dcache_purge_all:
 ! This routine forces a write-back and invalidate all dcache
 ! using a 8kb or 16kb 32-byte aligned buffer.
 !
+! With CCR.OIX set the cache index is address bit 25 plus bits 12:5, so a
+! contiguous buffer only reaches half of the cache entries: the address
+! array purge is used instead.
+!
 ! r4 is address for temporary buffer 32-byte aligned
 ! r5 is size of temporary buffer (8 KB or 16 KB)
     .align 2
 _dcache_purge_all_with_buffer:
+    mov.l    .ccr_addr, r1
+    mov.l    @r1, r0
+    tst      #.ccr_OIX, r0
+    bf       _dcache_purge_all
     mov      #0, r0
     add      r4, r5
 
@@ -354,7 +362,7 @@ ifr_addr:
 
 ! D-cache (Data cache)
 dca_addr:
-    .long    0xf4000008    ! dcache array address
+    .long    0xf4000000    ! dcache array address (non-associative: bit 3, the A bit, clear)
 dc_ubit_mask:
     .long    0xfffffffd    ! Mask to zero out U bit
 
