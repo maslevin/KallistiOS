@@ -43,26 +43,6 @@ typedef struct semaphore {
     \param  value           The initial count of the semaphore. */
 #define SEM_INITIALIZER(value) { 1, value }
 
-/** \brief  Allocate a new semaphore.
-
-    This function allocates and initializes a new semaphore for use.
-
-    \deprecated
-    This function is formally deprecated. Please update your code to use
-    sem_init() or static initialization with SEM_INITIALIZER instead.
-
-    \param  value           The initial count of the semaphore (the number of
-                            threads to allow in the critical section at a time)
-
-    \return                 The created semaphore on success. NULL is returned
-                            on failure and errno is set as appropriate.
-
-    \par    Error Conditions:
-    \em     ENOMEM - out of memory \n
-    \em     EINVAL - the semaphore's value is invalid (less than 0)
-*/
-semaphore_t *sem_create(int value) __depr("Use sem_init or SEM_INITIALIZER.");
-
 /** \brief  Initialize a semaphore for use.
 
     This function initializes the semaphore passed in with the starting count
@@ -80,34 +60,14 @@ int sem_init(semaphore_t *sm, int count);
 
 /** \brief  Destroy a semaphore.
 
-    This function frees a semaphore, releasing any memory associated with it. If
-    there are any threads currently waiting on the semaphore, they will be woken
+    This function destroys a semaphore, leaving it uninitialized. If there
+    are any threads currently waiting on the semaphore, they will be woken
     with an ENOTRECOVERABLE error.
 
-    \param  sem             The semaphore to destroy
+    \param  sm              The semaphore to destroy
     \retval 0               On success (no error conditions currently defined)
 */
-int sem_destroy(semaphore_t *sem);
-
-/** \brief  Wait on a semaphore.
-
-    This function will decrement the semaphore's count and return, if resources
-    are available. Otherwise, the function will block until the resources become
-    available.
-
-    This function does not protect you against doing things that will cause a
-    deadlock. This function is not safe to call in an interrupt. See
-    sem_trywait() for a safe function to call in an interrupt.
-
-    \param  sem             The semaphore to wait on
-    \retval 0               On success
-    \retval -1              On error, sets errno as appropriate
-
-    \par    Error Conditions:
-    \em     EPERM - called inside an interrupt \n
-    \em     EINVAL - the semaphore was not initialized
-*/
-int sem_wait(semaphore_t *sem);
+int sem_destroy(semaphore_t *sm) __nonnull_all;
 
 /** \brief  Wait on a semaphore (with a timeout).
 
@@ -119,7 +79,7 @@ int sem_wait(semaphore_t *sem);
     deadlock. This function is not safe to call in an interrupt. See
     sem_trywait() for a safe function to call in an interrupt.
 
-    \param  sem             The semaphore to wait on
+    \param  sm              The semaphore to wait on
     \param  timeout         The maximum number of milliseconds to block (a value
                             of 0 here will block indefinitely)
     \retval 0               On success
@@ -127,11 +87,30 @@ int sem_wait(semaphore_t *sem);
 
     \par    Error Conditions:
     \em     EPERM - called inside an interrupt \n
-    \em     EINVAL - the semaphore was not initialized \n
-    \em     EINVAL - the timeout value was invalid (less than 0) \n
     \em     ETIMEDOUT - timed out while blocking
  */
-int sem_wait_timed(semaphore_t *sem, int timeout);
+int sem_wait_timed(semaphore_t *sm, unsigned int timeout) __nonnull_all;
+
+/** \brief  Wait on a semaphore.
+
+    This function will decrement the semaphore's count and return, if resources
+    are available. Otherwise, the function will block until the resources become
+    available.
+
+    This function does not protect you against doing things that will cause a
+    deadlock. This function is not safe to call in an interrupt. See
+    sem_trywait() for a safe function to call in an interrupt.
+
+    \param  sm              The semaphore to wait on
+    \retval 0               On success
+    \retval -1              On error, sets errno as appropriate
+
+    \par    Error Conditions: None defined
+*/
+__nonnull_all
+static inline int sem_wait(semaphore_t *sm) {
+    return sem_wait_timed(sm, 0);
+}
 
 /** \brief  "Wait" on a semaphore without blocking.
 
@@ -142,15 +121,33 @@ int sem_wait_timed(semaphore_t *sem, int timeout);
     deadlock. This function, unlike the other waiting functions is safe to call
     inside an interrupt.
 
-    \param  sem             The semaphore to "wait" on
+    \param  sm              The semaphore to "wait" on
     \retval 0               On success
     \retval -1              On error, sets errno as appropriate
 
     \par    Error Conditions:
     \em     EWOULDBLOCK - a call to sem_wait() would block \n
-    \em     EINVAL - the semaphore was not initialized
 */
-int sem_trywait(semaphore_t *sem);
+int sem_trywait(semaphore_t *sm) __nonnull_all;
+
+/** \brief  Wait on a semaphore.
+
+    This function will decrement the semaphore's count and return, if resources
+    are available. Otherwise, the function will block until the resources become
+    available.
+
+    This function can be used from within an interrupt context. In that case, if
+    the semaphore is already used, an error will be returned.
+
+    \param  sm              The semaphore to wait on
+    \retval 0               On success
+    \retval -1              On error, sets errno as appropriate
+
+    \par    Error Conditions:
+    \em     EWOULDBLOCK - the function was called inside an interrupt and the
+                          semaphore is not free \n
+*/
+int sem_wait_irqsafe(semaphore_t *sm) __nonnull_all;
 
 /** \brief  Signal a semaphore.
 
@@ -158,14 +155,13 @@ int sem_trywait(semaphore_t *sem);
     a waiting thread to continue on, if any are waiting. It is your
     responsibility to make sure you only release resources you have.
 
-    \param  sem             The semaphore to signal
+    \param  sm              The semaphore to signal
     \retval 0               On success
     \retval -1              On error, sets errno as appropriate
 
-    \par    Error Conditions:
-    \em     EINVAL - the semaphore was not initialized
+    \par    Error Conditions: None defined
 */
-int sem_signal(semaphore_t *sem);
+int sem_signal(semaphore_t *sm) __nonnull_all;
 
 /** \brief  Retrieve the number of available resources.
 
@@ -173,11 +169,33 @@ int sem_signal(semaphore_t *sem);
     semaphore. This is not a thread-safe way to make sure resources will be
     available when you get around to waiting, so don't use it as such.
 
-    \param  sem             The semaphore to check
+    \param  sm              The semaphore to check
     \return                 The count of the semaphore (the number of resources
                             currently available)
 */
-int sem_count(semaphore_t *sem);
+int sem_count(const semaphore_t *sm) __nonnull_all;
+
+/** \cond */
+static inline void __sem_scoped_cleanup(semaphore_t **sm) {
+    if(*sm)
+        sem_signal(*sm);
+}
+
+#define ___sem_wait_scoped(sm, l) \
+    semaphore_t *__scoped_sem_##l __attribute__((cleanup(__sem_scoped_cleanup))) = sem_wait(sm) ? NULL : (sm)
+
+#define __sem_wait_scoped(sm, l) ___sem_wait_scoped(sm, l)
+/** \endcond */
+
+/** \brief  Wait on a semaphore with scope management
+
+    This macro will wait on a semaphore, similarly to sem_wait, with the
+    difference that the semaphore will automatically be signaled once the
+    execution exits the functional block in which the macro was called.
+
+    \param  sm              The semaphore to wait on
+*/
+#define sem_wait_scoped(sm) __sem_wait_scoped((sm), __LINE__)
 
 __END_DECLS
 

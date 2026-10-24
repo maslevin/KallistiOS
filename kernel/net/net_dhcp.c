@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -22,15 +23,17 @@
 #include <kos/mutex.h>
 #include <kos/fs_socket.h>
 
-#include <arch/timer.h>
+#include <kos/timer.h>
 
+#include "net_core.h"
 #include "net_dhcp.h"
-#include "net_thd.h"
 
 #define DHCP_SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
 
 #define DHCP_MIN_OPTIONS_SIZE 64
+
+#define DHCP_POLL_PERIOD_MS 50
 
 
 static int dhcp_sock = -1;
@@ -38,25 +41,24 @@ struct sockaddr_in srv_addr;
 
 struct dhcp_pkt_out {
     STAILQ_ENTRY(dhcp_pkt_out) pkt_queue;
-    uint8 *buf;
+    uint8_t *buf;
     int size;
     int pkt_type;
     int next_delay;
-    uint64 next_send;
+    uint64_t next_send;
 };
 
 STAILQ_HEAD(dhcp_pkt_queue, dhcp_pkt_out);
 
 static struct dhcp_pkt_queue dhcp_pkts = STAILQ_HEAD_INITIALIZER(dhcp_pkts);
 static mutex_t dhcp_lock = RECURSIVE_MUTEX_INITIALIZER;
-static int dhcp_cbid = -1;
-static uint64 renew_time = 0xFFFFFFFFFFFFFFFFULL;
-static uint64 rebind_time = 0xFFFFFFFFFFFFFFFFULL;
-static uint64 lease_expires = 0xFFFFFFFFFFFFFFFFULL;
+static uint64_t renew_time = 0xFFFFFFFFFFFFFFFFULL;
+static uint64_t rebind_time = 0xFFFFFFFFFFFFFFFFULL;
+static uint64_t lease_expires = 0xFFFFFFFFFFFFFFFFULL;
 static int state = DHCP_STATE_INIT;
 
-static int net_dhcp_fill_options(netif_t *net, dhcp_pkt_t *req, uint8 msgtype,
-                                 uint32 serverid, uint32 reqip) {
+static int net_dhcp_fill_options(netif_t *net, dhcp_pkt_t *req, uint8_t msgtype,
+                                 uint32_t serverid, uint32_t reqip) {
     int pos = 0;
 
     /* DHCP Magic Cookie */
@@ -78,7 +80,7 @@ static int net_dhcp_fill_options(netif_t *net, dhcp_pkt_t *req, uint8 msgtype,
 
     /* Host Name: Dreamcast */
     const char* host_name = "KallistiOS";
-    const uint8 size = strlen(host_name);
+    const uint8_t size = strlen(host_name);
     req->options[pos++] = DHCP_OPTION_HOST_NAME;
     req->options[pos++] = size;
     memcpy(req->options + pos, host_name, size);
@@ -129,7 +131,7 @@ static int net_dhcp_fill_options(netif_t *net, dhcp_pkt_t *req, uint8 msgtype,
     return (pos < DHCP_MIN_OPTIONS_SIZE) ? DHCP_MIN_OPTIONS_SIZE : pos;
 }
 
-static int net_dhcp_get_message_type(dhcp_pkt_t *pkt, int len) {
+static int __pure net_dhcp_get_message_type(dhcp_pkt_t *pkt, int len) {
     int i;
 
     len -= sizeof(dhcp_pkt_t);
@@ -152,7 +154,7 @@ static int net_dhcp_get_message_type(dhcp_pkt_t *pkt, int len) {
     return -1;
 }
 
-static uint32 net_dhcp_get_32bit(dhcp_pkt_t *pkt, uint8 opt, int len) {
+static uint32_t __pure net_dhcp_get_32bit(dhcp_pkt_t *pkt, uint8_t opt, int len) {
     int i;
 
     len -= sizeof(dhcp_pkt_t);
@@ -178,7 +180,7 @@ static uint32 net_dhcp_get_32bit(dhcp_pkt_t *pkt, uint8 opt, int len) {
     return 0;
 }
 
-static uint16 net_dhcp_get_16bit(dhcp_pkt_t *pkt, uint8 opt, int len) {
+static uint16_t __pure net_dhcp_get_16bit(dhcp_pkt_t *pkt, uint8_t opt, int len) {
     int i;
 
     len -= sizeof(dhcp_pkt_t);
@@ -204,8 +206,8 @@ static uint16 net_dhcp_get_16bit(dhcp_pkt_t *pkt, uint8 opt, int len) {
 }
 
 
-int net_dhcp_request(uint32 required_address) {
-    uint8 pkt[1500];
+static int do_net_dhcp_request(uint32_t required_address, bool in_wq) {
+    uint8_t pkt[1500];
     uint16_t pkt_len;
     dhcp_pkt_t *req = (dhcp_pkt_t *)pkt;
     int optlen;
@@ -251,7 +253,7 @@ int net_dhcp_request(uint32 required_address) {
 
     pkt_len = sizeof(dhcp_pkt_t) + optlen;
 
-    qpkt->buf = (uint8 *)malloc(pkt_len);
+    qpkt->buf = (uint8_t *)malloc(pkt_len);
 
     if(!qpkt->buf) {
         free(qpkt);
@@ -272,20 +274,24 @@ int net_dhcp_request(uint32 required_address) {
 
     /* We need to wait til we're either bound to an IP address, or until we give
        up all hope of doing so (give us 60 seconds). */
-    if(!net_thd_is_current()) {
-        rv = genwait_wait(&dhcp_sock, "net_dhcp_request", 60 * 1000, NULL);
+    if(!in_wq) {
+        rv = genwait_wait(&dhcp_sock, "net_dhcp_request", 60 * 1000);
     }
 
     return rv;
 }
 
+int net_dhcp_request(uint32_t required_address) {
+    return do_net_dhcp_request(required_address, false);
+}
+
 static void net_dhcp_send_request(dhcp_pkt_t *pkt, int pktlen, dhcp_pkt_t *pkt2,
                                   int pkt2len) {
-    uint8 buf[1500];
+    uint8_t buf[1500];
     dhcp_pkt_t *req = (dhcp_pkt_t *)buf;
     int optlen;
     struct dhcp_pkt_out *qpkt;
-    uint32 serverid = net_dhcp_get_32bit(pkt, DHCP_OPTION_SERVER_ID, pktlen);
+    uint32_t serverid = net_dhcp_get_32bit(pkt, DHCP_OPTION_SERVER_ID, pktlen);
 
     (void)pkt2;
     (void)pkt2len;
@@ -322,7 +328,7 @@ static void net_dhcp_send_request(dhcp_pkt_t *pkt, int pktlen, dhcp_pkt_t *pkt2,
         return;
     }
 
-    qpkt->buf = (uint8 *)malloc(sizeof(dhcp_pkt_t) + optlen);
+    qpkt->buf = (uint8_t *)malloc(sizeof(dhcp_pkt_t) + optlen);
 
     if(!qpkt->buf) {
         free(qpkt);
@@ -341,7 +347,7 @@ static void net_dhcp_send_request(dhcp_pkt_t *pkt, int pktlen, dhcp_pkt_t *pkt2,
 }
 
 static void net_dhcp_renew(void) {
-    uint8 buf[1500];
+    uint8_t buf[1500];
     dhcp_pkt_t *req = (dhcp_pkt_t *)buf;
     int optlen;
     struct dhcp_pkt_out *qpkt;
@@ -375,7 +381,7 @@ static void net_dhcp_renew(void) {
         return;
     }
 
-    qpkt->buf = (uint8 *)malloc(sizeof(dhcp_pkt_t) + optlen);
+    qpkt->buf = (uint8_t *)malloc(sizeof(dhcp_pkt_t) + optlen);
 
     if(!qpkt->buf) {
         free(qpkt);
@@ -392,7 +398,7 @@ static void net_dhcp_renew(void) {
 }
 
 static void net_dhcp_bind(dhcp_pkt_t *pkt, int len) {
-    uint32 tmp = ntohl(pkt->yiaddr);
+    uint32_t tmp = ntohl(pkt->yiaddr);
 
     irq_disable_scoped();
 
@@ -459,11 +465,11 @@ static void net_dhcp_bind(dhcp_pkt_t *pkt, int len) {
     if(tmp != 0 && tmp != 0xFFFFFFFF) {
         /* Set our renewal timer to half the lease time and the rebinding timer
            to .875 * lease time. */
-        uint64 now = timer_ms_gettime64();
+        uint64_t now = timer_ms_gettime64();
         int expiry = ntohl(tmp) * 1000;
 
         renew_time = now + (expiry >> 1);
-        rebind_time = now + (uint64)(expiry * 0.875);
+        rebind_time = now + (uint64_t)(expiry * 0.875);
         lease_expires = now + expiry;
     }
     else if(tmp == 0xFFFFFFFF) {
@@ -474,23 +480,21 @@ static void net_dhcp_bind(dhcp_pkt_t *pkt, int len) {
     tmp = net_dhcp_get_16bit(pkt, DHCP_OPTION_INTERFACE_MTU, len);
 
     if(tmp != 0) {
-        net_default_dev->mtu = (int)((uint16)tmp);
+        net_default_dev->mtu = (int)((uint16_t)tmp);
     }
 
     state = DHCP_STATE_BOUND;
 }
 
-static void net_dhcp_thd(void *obj) {
+static void net_dhcp_job(workqueue_t *wq, workqueue_job_t *job) {
     struct dhcp_pkt_out *qpkt, *q_tmp;
-    uint64 now;
+    uint64_t now;
     struct sockaddr_in addr;
-    uint8 buf[1500];
+    uint8_t buf[1500];
     ssize_t len = 0;
     socklen_t addr_len = sizeof(struct sockaddr_in);
     dhcp_pkt_t *pkt = (dhcp_pkt_t *)buf, *pkt2;
     int found;
-
-    (void)obj;
 
     now = timer_ms_gettime64();
     len = 0;
@@ -509,7 +513,7 @@ static void net_dhcp_thd(void *obj) {
         state = DHCP_STATE_INIT;
         srv_addr.sin_addr.s_addr = INADDR_BROADCAST;
         memset(net_default_dev->ip_addr, 0, 4);
-        net_dhcp_request(0);
+        do_net_dhcp_request(0, true);
     }
     else if(rebind_time <= now &&
             (state == DHCP_STATE_BOUND || state == DHCP_STATE_RENEWING)) {
@@ -591,7 +595,7 @@ static void net_dhcp_thd(void *obj) {
                     else if(found == DHCP_MSG_DHCPNAK) {
                         /* We got a NAK, try to discover again. */
                         state = DHCP_STATE_INIT;
-                        net_dhcp_request(0);
+                        do_net_dhcp_request(0, true);
                     }
 
                     /* Remove the old packet from our queue */
@@ -617,7 +621,15 @@ static void net_dhcp_thd(void *obj) {
             qpkt->next_delay <<= 1;
         }
     }
+
+    /* Reprogram the workqueue job */
+    job->time_ms = now + DHCP_POLL_PERIOD_MS;
+    workqueue_enqueue(wq, job);
 }
+
+static workqueue_job_t net_dhcp_wq_job = {
+    .cb = net_dhcp_job,
+};
 
 int net_dhcp_init(void) {
     struct sockaddr_in addr;
@@ -649,16 +661,14 @@ int net_dhcp_init(void) {
     fs_fcntl(dhcp_sock, F_SETFL, O_NONBLOCK);
 
     /* Create the callback for processing DHCP packets */
-    dhcp_cbid = net_thd_add_callback(&net_dhcp_thd, NULL, 50);
+    net_dhcp_wq_job.time_ms = timer_ms_gettime64() + DHCP_POLL_PERIOD_MS;
+    workqueue_enqueue(net_wq, &net_dhcp_wq_job);
 
     return 0;
 }
 
 void net_dhcp_shutdown(void) {
-    if(dhcp_cbid != -1) {
-        net_thd_del_callback(dhcp_cbid);
-        dhcp_cbid = -1;
-    }
+    workqueue_cancel(net_wq, &net_dhcp_wq_job);
 
     if(dhcp_sock != -1) {
         close(dhcp_sock);

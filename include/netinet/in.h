@@ -20,7 +20,7 @@
 #ifndef __NETINET_IN_H
 #define __NETINET_IN_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 
 __BEGIN_DECLS
 
@@ -32,12 +32,12 @@ __BEGIN_DECLS
 #include <inttypes.h>
 #include <sys/socket.h>
 
-/** \brief   16-bit type used to store a value for an internet port. 
+/** \brief   16-bit type used to store a value for an internet port.
     \ingroup networking_ip
 */
 typedef uint16_t in_port_t;
 
-/** \brief   32-bit value used to store an IPv4 address. 
+/** \brief   32-bit value used to store an IPv4 address.
     \ingroup networking_ipv4
 */
 typedef uint32_t in_addr_t;
@@ -177,17 +177,17 @@ extern const struct in6_addr in6addr_any;
 */
 extern const struct in6_addr in6addr_loopback;
 
-/** \brief   Length of a string form of a maximal IPv4 address. 
+/** \brief   Length of a string form of a maximal IPv4 address.
     \ingroup networking_ipv4
 */
 #define INET_ADDRSTRLEN 16
 
-/** \brief   Length of a string form of a maximal IPv6 address. 
+/** \brief   Length of a string form of a maximal IPv6 address.
     \ingroup networking_ipv6
 */
 #define INET6_ADDRSTRLEN 46
 
-/** \brief   Internet Protocol Version 4. 
+/** \brief   Internet Protocol Version 4.
     \ingroup networking_ip
 */
 #define IPPROTO_IP      0
@@ -197,22 +197,22 @@ extern const struct in6_addr in6addr_loopback;
 */
 #define IPPROTO_ICMP    1
 
-/** \brief   Transmission Control Protocol. 
+/** \brief   Transmission Control Protocol.
     \ingroup networking_ip
 */
 #define IPPROTO_TCP     6
 
-/** \brief   User Datagram Protocol. 
+/** \brief   User Datagram Protocol.
     \ingroup networking_ip
 */
 #define IPPROTO_UDP     17
 
-/** \brief   Internet Protocol Version 6. 
+/** \brief   Internet Protocol Version 6.
     \ingroup networking_ip
 */
 #define IPPROTO_IPV6    41
 
-/** \brief   Lightweight User Datagram Protocol. 
+/** \brief   Lightweight User Datagram Protocol.
     \ingroup networking_ip
 */
 #define IPPROTO_UDPLITE 136
@@ -237,6 +237,7 @@ extern const struct in6_addr in6addr_loopback;
 */
 
 #define IP_TTL              24  /**< \brief TTL for unicast (get/set) */
+#define IP_TOS              26  /**< \brief Type of service (get/set) */
 
 /** @} */
 
@@ -276,7 +277,7 @@ extern const struct in6_addr in6addr_loopback;
     unspecified address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is unspecified, 0 otherwise.
 */
 #define IN6_IS_ADDR_UNSPECIFIED(a)  \
@@ -292,7 +293,7 @@ extern const struct in6_addr in6addr_loopback;
     loopback address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is a loopback, 0 otherwise.
 */
 #define IN6_IS_ADDR_LOOPBACK(a)  \
@@ -310,7 +311,7 @@ extern const struct in6_addr in6addr_loopback;
     mapped address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is IPv4 mapped, 0 otherwise.
 */
 #define IN6_IS_ADDR_V4MAPPED(a)  \
@@ -326,7 +327,7 @@ extern const struct in6_addr in6addr_loopback;
     compatibility address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is IPv4 compat, 0 otherwise.
 */
 #define IN6_IS_ADDR_V4COMPAT(a)  \
@@ -343,7 +344,7 @@ extern const struct in6_addr in6addr_loopback;
     address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is link-local, 0 otherwise.
 */
 #define IN6_IS_ADDR_LINKLOCAL(a)  \
@@ -357,7 +358,7 @@ extern const struct in6_addr in6addr_loopback;
     address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is site-local, 0 otherwise.
 */
 #define IN6_IS_ADDR_SITELOCAL(a)  \
@@ -371,7 +372,7 @@ extern const struct in6_addr in6addr_loopback;
     address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is multicast, 0 otherwise.
 */
 #define IN6_IS_ADDR_MULTICAST(a)  \
@@ -384,7 +385,7 @@ extern const struct in6_addr in6addr_loopback;
     multicast address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is a node-local multicast
                         address, 0 otherwise.
 */
@@ -399,7 +400,7 @@ extern const struct in6_addr in6addr_loopback;
     multicast address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is a link-local multicast
                         address, 0 otherwise.
 */
@@ -414,7 +415,7 @@ extern const struct in6_addr in6addr_loopback;
     multicast address.
 
     \param  a           The address to test (struct in6_addr *)
-    
+
     \return             Nonzero if the address is a site-local multicast
                         address, 0 otherwise.
 */

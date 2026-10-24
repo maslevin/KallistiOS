@@ -14,12 +14,12 @@
 #include <dc/video.h>
 #include <kos/dbglog.h>
 #include <kos/fs.h>
-#include <arch/irq.h>
+#include <kos/irq.h>
 
-#include <arch/timer.h>
+#include <kos/timer.h>
 
 /*
-    Provides a very simple screen shot facility (dumps raw 24bpp RGB image 
+    Provides a very simple screen shot facility (dumps raw 24bpp RGB image
     data from the currently viewed framebuffer).
 
     This will now work with any of the supported video modes.
@@ -44,7 +44,7 @@ size_t vid_screen_shot_data(uint8_t **buffer) {
 
     *buffer = (uint8_t *)malloc(buffer_size);
     if(*buffer == NULL) {
-        dbglog(DBG_ERROR, "vid_screen_shot_data: can't allocate memory\n"); 
+        dbglog(DBG_ERROR, "vid_screen_shot_data: can't allocate memory\n");
         return 0;
     }
 
@@ -107,7 +107,7 @@ size_t vid_screen_shot_data(uint8_t **buffer) {
             }
             break;
         default:
-            dbglog(DBG_ERROR, "vid_screen_shot_data: can't process pixel mode %d\n", vid_mode->pm); 
+            dbglog(DBG_ERROR, "vid_screen_shot_data: can't process pixel mode %d\n", vid_mode->pm);
             free(*buffer);
             *buffer = NULL;
             irq_restore(save);
@@ -131,7 +131,7 @@ int vid_screen_shot(const char *destfn) {
 
     /* Open output file */
     f = fs_open(destfn, O_WRONLY | O_TRUNC);
-    if(!f) {
+    if(f == FILEHND_INVALID) {
         dbglog(DBG_ERROR, "vid_screen_shot: can't open output file '%s'\n", destfn);
         return -1;
     }

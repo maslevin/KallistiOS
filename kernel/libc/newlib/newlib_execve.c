@@ -5,10 +5,15 @@
 
 */
 
-#include <sys/reent.h>
+#include <reent.h>
 #include <errno.h>
 
-int _execve_r(struct _reent * reent) {
-    reent->_errno = EAGAIN;
+int _execve_r(struct _reent *reent, const char *name, char *const argv[], char *const env[]) {
+    (void)reent;
+    (void)name;
+    (void)argv;
+    (void)env;
+
+    errno = EINVAL;
     return -1;
 }

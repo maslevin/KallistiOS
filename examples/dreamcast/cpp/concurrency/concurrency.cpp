@@ -61,7 +61,7 @@
 #include <exception>
 #include <string>
 
-#include <arch/wdt.h>
+#include <dc/wdt.h>
 
 // 20 seconds in us
 inline constexpr unsigned WATCHDOG_TIMEOUT = (20 * 1000 * 1000);  
@@ -650,7 +650,7 @@ namespace {
     };
 
     template<typename FF>
-    defer_raii(FF &&ff) -> defer_raii<decltype(ff)>;
+    defer_raii(FF &&ff) -> defer_raii<std::decay_t<FF>>;
 }  // anonymous namespace
 
 auto defer(auto &&f) {

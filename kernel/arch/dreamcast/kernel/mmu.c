@@ -7,17 +7,19 @@
 /* SH-4 MMU related functions, ported up from KOS-MMU */
 
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 
-#include <kos/thread.h>
 #include <arch/arch.h>
-#include <arch/types.h>
-#include <arch/irq.h>
-#include <arch/memory.h>
 #include <arch/mmu.h>
+
+#include <dc/memory.h>
+
+#include <kos/cache.h>
 #include <kos/dbgio.h>
+#include <kos/irq.h>
 #include <kos/regfield.h>
-#include <arch/cache.h>
+#include <kos/thread.h>
 
 #define MMU_TOP_MASK GENMASK(30, 21)            /**< \brief Top-level mask */
 #define MMU_BOT_MASK GENMASK(20, 12)            /**< \brief Bottom mask */
@@ -210,6 +212,30 @@ void mmu_switch_context(mmucontext_t *context) {
     SET_PTEH(0, context->asid);
 }
 
+static void mmu_page_uninstall(unsigned int virtpage)
+{
+    /* Note: bit 7 of the address is associativity bit. When set, each TLB entry
+     * corresponding to the value will be invalidated. */
+    *(volatile uint32_t *)(MEM_AREA_UTLB_ADDRESS_ARRAY_BASE | BIT(7))
+        = virtpage << PAGESIZE_BITS;
+}
+
+void mmu_page_unmap(mmucontext_t *context, int virtpage, int count)
+{
+    mmupage_t *page;
+
+    while(count) {
+        page = map_virt(context, virtpage);
+        if(page) {
+            page->valid = 0;
+            mmu_page_uninstall(virtpage);
+        }
+
+        virtpage++;
+        count--;
+    }
+}
+
 /* Set the given virtual page to map to the given physical page; implies
    turning on the "valid" bit. */
 static void mmu_page_map_single(mmucontext_t *context,
@@ -219,21 +245,22 @@ static void mmu_page_map_single(mmucontext_t *context,
     mmusubcontext_t *sub;
     mmupage_t   *page;
     int     top, bot, i;
-
-    (void)dirty;
+    int vaddr;
 
     /* Get back the virtual address */
-    virtpage = virtpage << MMU_IND_BITS;
+    vaddr = virtpage << MMU_IND_BITS;
 
     /* Mask out and grab the top and bottom indices */
-    top = FIELD_GET(virtpage, MMU_TOP_MASK);
-    bot = FIELD_GET(virtpage, MMU_BOT_MASK);
+    top = FIELD_GET(vaddr, MMU_TOP_MASK);
+    bot = FIELD_GET(vaddr, MMU_BOT_MASK);
 
     /* Look up the top-level sub-context; if there isn't one, create one. */
     sub = context->sub[top];
 
     if(sub == NULL) {
         sub = (mmusubcontext_t *)malloc(sizeof(mmusubcontext_t));
+        if(sub == NULL)
+            return;
 
         for(i = 0; i < MMU_SUB_PAGES; i++)
             sub->page[i].valid = 0;
@@ -244,7 +271,9 @@ static void mmu_page_map_single(mmucontext_t *context,
     /* Look up the bottom-level page */
     page = sub->page + bot;
 
-    /* XXX Invalidate ITLB if necessary when page->valid == 1 */
+    if(page->valid)
+        mmu_page_uninstall((unsigned int)virtpage);
+
     page->physical = physpage;
     page->prkey = prot;
 
@@ -253,25 +282,21 @@ static void mmu_page_map_single(mmucontext_t *context,
             page->cache = 0;
             break;
         case MMU_CACHE_BACK:
-            page->cache = 0;
+            page->cache = 1;
             page->wthru = 0;
-            break;    /* XXX tmp */
-        case MMU_CACHE_WT:
-            page->cache = 0;
-            page->wthru = 1;
             break;
-        default:
-            page->cache = 0;
-            page->wthru = 0;
+        case MMU_CACHE_WT:
+            page->cache = 1;
+            page->wthru = 1;
             break;
     }
 
-    page->dirty = 1;    /* XXX Initial-write exception not called */
+    page->dirty = dirty;
     page->blank = 0;
     page->shared = share;
     page->valid = 1;
 
-    page->pteh = BUILD_PTEH(virtpage, 0);
+    page->pteh = BUILD_PTEH(vaddr, 0);
     page->ptel = BUILD_PTEL(page->physical << PAGESIZE_BITS, 1, 1, page->prkey,
                             page->cache, page->dirty, page->shared, page->wthru);
 }

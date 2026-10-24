@@ -18,9 +18,9 @@
 #ifndef __DC_FMATH_BASE_H
 #define __DC_FMATH_BASE_H
 
-#include <arch/args.h>
+#include <dc/args.h>
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 

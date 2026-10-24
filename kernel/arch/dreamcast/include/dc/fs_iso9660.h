@@ -1,6 +1,6 @@
 /* KallistiOS ##version##
 
-   dc/fs/iso9660.h
+   dc/fs_iso9660.h
    (c)2000-2001 Megan Potter
 
 */
@@ -26,11 +26,8 @@
 #ifndef __DC_FS_ISO9660_H
 #define __DC_FS_ISO9660_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
-
-#include <kos/limits.h>
-#include <kos/fs.h>
 
 /** \addtogroup gdrom
     @{

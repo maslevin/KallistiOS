@@ -2,19 +2,21 @@
 
    snd_mem.c
    Copyright (C) 2002 Megan Potter
-   Copyright (C) 2023 Ruslan Rostovtsev
+   Copyright (C) 2023, 2025 Ruslan Rostovtsev
 
  */
 
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/queue.h>
 #include <dc/sound/sound.h>
-#include <arch/spinlock.h>
+#include <arch/arch.h>
 #include <kos/dbglog.h>
+#include <kos/mutex.h>
 
 /*
 
@@ -51,35 +53,35 @@ typedef struct snd_block_str {
     TAILQ_ENTRY(snd_block_str)  qent;
 
     /* The address of this block (offset from SPU RAM base) */
-    uint32  addr;
+    uint32_t  addr;
 
     /* The size of this block */
     size_t  size;
 
     /* Is this block in use? */
-    int inuse;
+    bool inuse;
 } snd_block_t;
 
 /* Our SPU RAM pool */
-static int initted = 0;
+static bool initted = false;
 static TAILQ_HEAD(snd_block_q, snd_block_str) pool = {0};
-static spinlock_t snd_mem_mutex = SPINLOCK_INITIALIZER;
+static mutex_t snd_mem_mutex = MUTEX_INITIALIZER;
 
 
 /* Reinitialize the pool with the given RAM base offset */
-int snd_mem_init(uint32 reserve) {
+int snd_mem_init(uint32_t reserve) {
     snd_block_t *blk;
 
     if(initted)
         snd_mem_shutdown();
 
-    if(!spinlock_lock_irqsafe(&snd_mem_mutex)) {
+    if(mutex_lock_irqsafe(&snd_mem_mutex)) {
         errno = EAGAIN;
         return -1;
     }
 
     // Make sure our base is 32-byte aligned
-    reserve = (reserve + 0x1f) & ~0x1f;
+    reserve = __align_up(reserve, 32);
 
     /* Make sure our tailq is initted */
     TAILQ_INIT(&pool);
@@ -87,22 +89,26 @@ int snd_mem_init(uint32 reserve) {
     blk = (snd_block_t *)malloc(sizeof(snd_block_t));
 
     if(!blk) {
-        spinlock_unlock(&snd_mem_mutex);
+        mutex_unlock(&snd_mem_mutex);
         errno = ENOMEM;
         return -1;
     }
 
     memset(blk, 0, sizeof(snd_block_t));
     blk->addr = reserve;
-    blk->size = 2 * 1024 * 1024 - reserve;
-    blk->inuse = 0;
+
+    if(hardware_sys_mode(NULL) == HW_TYPE_RETAIL)
+        blk->size = 2 * 1024 * 1024 - reserve;
+    else
+        blk->size = 8 * 1024 * 1024 - reserve;
+
+    blk->inuse = false;
     TAILQ_INSERT_HEAD(&pool, blk, qent);
 
-    if(__is_defined(SNDMEMDEBUG))
-        dbglog(DBG_DEBUG, "snd_mem_init: %d bytes available\n", blk->size);
+    dbglog(DBG_SOURCE(SNDMEMDEBUG), "snd_mem_init: %d bytes available\n", blk->size);
 
-    initted = 1;
-    spinlock_unlock(&snd_mem_mutex);
+    initted = true;
+    mutex_unlock(&snd_mem_mutex);
 
     return 0;
 }
@@ -113,44 +119,38 @@ void snd_mem_shutdown(void) {
 
     if(!initted) return;
 
-    if(!spinlock_lock_irqsafe(&snd_mem_mutex))
+    if(mutex_lock_irqsafe(&snd_mem_mutex))
         return;
 
-    e = TAILQ_FIRST(&pool);
+    TAILQ_FOREACH_SAFE(e, &pool, qent, n) {
+        dbglog(DBG_SOURCE(SNDMEMDEBUG), "snd_mem_shutdown: %s block at %08lx (size %d)\n",
+               e->inuse ? "in-use" : "unused", e->addr, e->size);
 
-    while(e) {
-        n = TAILQ_NEXT(e, qent);
-
-        if(__is_defined(SNDMEMDEBUG)) {
-            dbglog(DBG_DEBUG, "snd_mem_shutdown: %s block at %08lx (size %d)\n",
-                   e->inuse ? "in-use" : "unused", e->addr, e->size);
-        }
-
+        TAILQ_REMOVE(&pool, e, qent);
         free(e);
-        e = n;
     }
 
-    initted = 0;
-    spinlock_unlock(&snd_mem_mutex);
+    initted = false;
+    mutex_unlock(&snd_mem_mutex);
 }
 
 /* Allocate a chunk of SPU RAM; we will return an offset into SPU RAM. */
-uint32 snd_mem_malloc(size_t size) {
+uint32_t snd_mem_malloc(size_t size) {
     snd_block_t *e, *best = NULL;
-    size_t best_size = 4 * 1024 * 1024;
+    size_t best_size = SIZE_MAX;
 
     assert_msg(initted, "Use of snd_mem_malloc before snd_mem_init");
 
     if(size == 0)
         return 0;
 
-    if(!spinlock_lock_irqsafe(&snd_mem_mutex)) {
+    if(mutex_lock_irqsafe(&snd_mem_mutex)) {
         errno = EAGAIN;
         return 0;
     }
 
     // Make sure the size is a multiple of 32 bytes to maintain alignment
-    size = (size + 0x1f) & ~0x1f;
+    size = __align_up(size, 32);
 
     /* Look for a block */
     TAILQ_FOREACH(e, &pool, qent) {
@@ -162,19 +162,17 @@ uint32 snd_mem_malloc(size_t size) {
 
     if(best == NULL) {
         dbglog(DBG_ERROR, "snd_mem_malloc: no chunks big enough for alloc(%d)\n", size);
-        spinlock_unlock(&snd_mem_mutex);
+        mutex_unlock(&snd_mem_mutex);
         return 0;
     }
 
     /* Is the block the exact size? */
     if(best->size == size) {
-        if(__is_defined(SNDMEMDEBUG)) {
-            dbglog(DBG_DEBUG, "snd_mem_malloc: allocating perfect-fit at %08lx for size %d\n",
-                   best->addr, best->size);
-        }
+        dbglog(DBG_SOURCE(SNDMEMDEBUG), "snd_mem_malloc: allocating perfect-fit at %08lx for size %d\n",
+               best->addr, best->size);
 
-        best->inuse = 1;
-        spinlock_unlock(&snd_mem_mutex);
+        best->inuse = true;
+        mutex_unlock(&snd_mem_mutex);
         return best->addr;
     }
 
@@ -183,31 +181,29 @@ uint32 snd_mem_malloc(size_t size) {
 
     if(e == NULL) {
         dbglog(DBG_ERROR, "snd_mem_malloc: not enough main memory to alloc(%d)\n", size);
-        spinlock_unlock(&snd_mem_mutex);
+        mutex_unlock(&snd_mem_mutex);
         return 0;
     }
 
     memset(e, 0, sizeof(snd_block_t));
     e->addr = best->addr + size;
     e->size = best->size - size;
-    e->inuse = 0;
+    e->inuse = false;
     TAILQ_INSERT_AFTER(&pool, best, e, qent);
 
-    if(__is_defined(SNDMEMDEBUG)) {
-        dbglog(DBG_DEBUG, "snd_mem_malloc: allocating block %08lx for size %d, and leaving %d at %08lx\n",
+    dbglog(DBG_SOURCE(SNDMEMDEBUG), "snd_mem_malloc: allocating block %08lx for size %d, and leaving %d at %08lx\n",
                best->addr, size, e->size, e->addr);
-    }
 
     best->size = size;
-    best->inuse = 1;
+    best->inuse = true;
 
-    spinlock_unlock(&snd_mem_mutex);
+    mutex_unlock(&snd_mem_mutex);
     return best->addr;
 }
 
 /* Free a chunk of SPU RAM; pointer is expected to be an offset into
    SPU RAM. */
-void snd_mem_free(uint32 addr) {
+void snd_mem_free(uint32_t addr) {
     snd_block_t *e, *o;
 
     assert_msg(initted, "Use of snd_mem_free before snd_mem_init");
@@ -215,7 +211,7 @@ void snd_mem_free(uint32 addr) {
     if(addr == 0)
         return;
 
-    if(!spinlock_lock_irqsafe(&snd_mem_mutex))
+    if(mutex_lock_irqsafe(&snd_mem_mutex))
         return;
 
     /* Look for the block */
@@ -225,23 +221,21 @@ void snd_mem_free(uint32 addr) {
     }
 
     if(!e) {
-        dbglog(DBG_ERROR, "snd_mem_free: attempt to free non-existent block at %08lx\n", (uint32)e);
-        spinlock_unlock(&snd_mem_mutex);
+        dbglog(DBG_ERROR, "snd_mem_free: attempt to free non-existent block at %08lx\n", (uint32_t)e);
+        mutex_unlock(&snd_mem_mutex);
         return;
     }
 
     /* Set this block as unused */
-    e->inuse = 0;
+    e->inuse = false;
 
-    if(__is_defined(SNDMEMDEBUG))
-        dbglog(DBG_DEBUG, "snd_mem_free: freeing block at %08lx\n", e->addr);
+    dbglog(DBG_SOURCE(SNDMEMDEBUG), "snd_mem_free: freeing block at %08lx\n", e->addr);
 
     /* Can we coalesce with the block before us? */
     o = TAILQ_PREV(e, snd_block_q, qent);
 
     if(o && !o->inuse) {
-        if(__is_defined(SNDMEMDEBUG))
-            dbglog(DBG_DEBUG, "   coalescing with block at %08lx\n", o->addr);
+        dbglog(DBG_SOURCE(SNDMEMDEBUG), "   coalescing with block at %08lx\n", o->addr);
 
         o->size += e->size;
         TAILQ_REMOVE(&pool, e, qent);
@@ -253,24 +247,23 @@ void snd_mem_free(uint32 addr) {
     o = TAILQ_NEXT(e, qent);
 
     if(o && !o->inuse) {
-        if(__is_defined(SNDMEMDEBUG))
-            dbglog(DBG_DEBUG, "   coalescing with block at %08lx\n", o->addr);
+        dbglog(DBG_SOURCE(SNDMEMDEBUG), "   coalescing with block at %08lx\n", o->addr);
 
         e->size += o->size;
         TAILQ_REMOVE(&pool, o, qent);
         free(o);
     }
-    spinlock_unlock(&snd_mem_mutex);
+    mutex_unlock(&snd_mem_mutex);
 }
 
-uint32 snd_mem_available(void) {
+uint32_t snd_mem_available(void) {
     snd_block_t *e;
     size_t largest = 0;
 
     if(!initted)
         return 0;
 
-    if(!spinlock_lock_irqsafe(&snd_mem_mutex)) {
+    if(mutex_lock_irqsafe(&snd_mem_mutex)) {
         errno = EAGAIN;
         return 0;
     }
@@ -280,6 +273,6 @@ uint32 snd_mem_available(void) {
             largest = e->size;
     }
 
-    spinlock_unlock(&snd_mem_mutex);
-    return (uint32)largest;
+    mutex_unlock(&snd_mem_mutex);
+    return (uint32_t)largest;
 }

@@ -7,10 +7,9 @@
 */
 
 #include <kos/fs.h>
-#include <sys/reent.h>
-#include <errno.h>
+#include <reent.h>
 
-int _link_r(struct _reent * reent, const char * oldf, const char * newf) {
+int _link_r(struct _reent *reent, const char *oldf, const char *newf) {
     (void)reent;
     return fs_link(oldf, newf);
 }

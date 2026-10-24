@@ -16,9 +16,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <arch/arch.h>
 #include <kos/net.h>
 #include <kos/thread.h>
+#include <kos/init.h>
 #include <kos/dbgio.h>
 
 KOS_INIT_FLAGS(INIT_DEFAULT | INIT_NET);
@@ -28,7 +28,7 @@ KOS_INIT_FLAGS(INIT_DEFAULT | INIT_NET);
 int main(int argc, char *argv[]) {
     /* The address to ping... */
     struct in6_addr addr;
-    uint8 data[DATA_SIZE];
+    uint8_t data[DATA_SIZE];
     char str1[INET6_ADDRSTRLEN], str2[INET6_ADDRSTRLEN];
     int i;
 
@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
     /* Fill in the data for the ping packet... this is pretty simple and doesn't
        really have any real meaning... */
     for(i = 0; i < DATA_SIZE; ++i) {
-        data[i] = (uint8)i;
+        data[i] = (uint8_t)i;
     }
 
     /* Send out a router solicitation so that we get a global prefix. */

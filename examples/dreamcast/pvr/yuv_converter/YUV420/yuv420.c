@@ -36,8 +36,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <arch/arch.h>
-#include <arch/cache.h>
 
 #include <dc/pvr.h>
 #include <dc/maple.h>
@@ -145,8 +143,6 @@ static int setup_pvr(void) {
                     PVR_FILTER_BILINEAR);
     pvr_poly_compile(&hdr, &cxt);
 
-    hdr.mode3 |= PVR_TXRFMT_STRIDE;
-
     vert[0].z     = vert[1].z     = vert[2].z     = vert[3].z     = 1.0f; 
     vert[0].argb  = vert[1].argb  = vert[2].argb  = vert[3].argb  = 
         PVR_PACK_COLOR(1.0f, 1.0f, 1.0f, 1.0f);    
@@ -181,7 +177,7 @@ static int setup_pvr(void) {
 }
 
 static void convert_YUV420_to_YUV422_texture(void) {
-    int i, j, index, x_blk, y_blk;
+    size_t i, j, index, x_blk, y_blk;
     size_t dummies = (BYTE_SIZE_FOR_16x16_BLOCK *
         ((PVR_TEXTURE_WIDTH >> 4) - (FRAME_TEXTURE_WIDTH >> 4))) >> 5;
     uint32_t *db = (uint32_t *)SQ_MASK_DEST_ADDR(PVR_TA_YUV_CONV);
@@ -239,8 +235,6 @@ static void convert_YUV420_to_YUV422_texture(void) {
 }
 
 static void show_image(void) {
-
-    pvr_wait_ready();
     pvr_scene_begin();
 
     pvr_list_begin(PVR_LIST_OP_POLY);
@@ -268,7 +262,7 @@ static void __attribute__((__noreturn__)) wait_exit(void) {
 
             if(state)   {
                 if(state->buttons)
-                    arch_exit();
+                    exit(0);
             }
         }
     }

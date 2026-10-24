@@ -63,7 +63,7 @@ static Void_t** iCOMALLOc(size_t, size_t*, Void_t**);
 static void     cFREe(Void_t*);
 static int      mTRIm(size_t);
 static size_t   mUSABLe(Void_t*);
-static void     mSTATs();
+static void     mSTATs(void);
 static int      mALLOPt(int, int);
 static struct mallinfo mALLINFo(void);
 #else
@@ -95,13 +95,21 @@ static struct mallinfo mALLINFo();
 
 #ifdef USE_MALLOC_LOCK
 
-#include <arch/spinlock.h>
+#include <kos/mutex.h>
 
-static spinlock_t mALLOC_MUTEx = SPINLOCK_INITIALIZER;
-
-/* This is pretty GCC dependent ^_^; */
-#define MALLOC_PREACTION   ({ spinlock_lock(&mALLOC_MUTEx); 0; })
-#define MALLOC_POSTACTION  ({ spinlock_unlock(&mALLOC_MUTEx); 0; })
+/* Enable thread locking. Because spin locks can cause priority inversion,
+   we use mutexes here. */
+static mutex_t mALLOC_MUTEx = MUTEX_INITIALIZER;
+#define MALLOC_PREACTION ({                         \
+    int result = mutex_lock_irqsafe(&mALLOC_MUTEx); \
+    assert(result == 0);                            \
+    result;                                         \
+})
+#define MALLOC_POSTACTION ({                  \
+    int result = mutex_unlock(&mALLOC_MUTEx); \
+    assert(result == 0);                      \
+    result;                                   \
+})
 
 #else
 

@@ -24,7 +24,7 @@
 #ifndef __DC_MATRIX_H
 #define __DC_MATRIX_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 #include <dc/vector.h>
@@ -57,7 +57,7 @@ void mat_store(matrix_t *out);
     \warning
     \p out MUST be at least 8-byte aligned!
 
-    \note 
+    \note
     For best performance, 32-byte alignment of \p out is recommended.
 
     \param  src             A pointer to where to load the matrix from (must be
@@ -78,7 +78,7 @@ void mat_identity(void);
     \warning
     \p src MUST be at least 8-byte aligned!
 
-    \note 
+    \note
     For best performance, 32-byte alignment of \p src is recommended.
 
     \param  src             A pointer to the matrix to multiply.

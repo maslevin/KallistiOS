@@ -6,12 +6,12 @@
 
 TARGET = stackprotector.elf
 OBJS = stackprotector.o
+# Disable optimization that might avoid the overflow and the warning the intentional error would create
+KOS_CFLAGS += -O0 -Wno-stringop-overflow -Wno-analyzer-out-of-bounds
+# Force stack protector on
 KOS_CFLAGS += -fstack-protector-all
-KOS_GCCVER_MIN = 4.0.0
 
 include $(KOS_BASE)/Makefile.rules
-
-ifeq ($(call KOS_GCCVER_MIN_CHECK,$(KOS_GCCVER_MIN)),1)
 
 all: rm-elf $(TARGET)
 
@@ -31,10 +31,4 @@ dist: $(TARGET)
 	-rm -f $(OBJS)
 	$(KOS_STRIP) $(TARGET)
 
-else
-  all $(TARGET) clean rm-elf run dist:
-	$(KOS_GCCVER_MIN_WARNING)
-endif
-
 .PHONY: run dist clean rm-elf
-

@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
     int done = 0, done2 = 0;
 
     cont_btn_callback(0, CONT_START | CONT_A | CONT_B | CONT_X | CONT_Y,
-                      (cont_btn_callback_t)arch_exit);
+                      (cont_btn_callback_t)exit);
 
     pvr_init_defaults();
 
@@ -154,7 +154,6 @@ int main(int argc, char **argv) {
 
     // Enter the main loop -- user interaction would normally happen here.
     while(!done) {
-        pvr_wait_ready();
         pvr_scene_begin();
         pvr_list_begin(PVR_LIST_OP_POLY);
 
@@ -215,7 +214,6 @@ int main(int argc, char **argv) {
 
     // Ok, do another drawing loop, and quit when the scene says it's done
     while(!sc->isFinished() && !done2) {
-        pvr_wait_ready();
         pvr_scene_begin();
         pvr_list_begin(PVR_LIST_OP_POLY);
 

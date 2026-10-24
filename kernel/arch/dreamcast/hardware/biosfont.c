@@ -56,7 +56,7 @@ static uint8_t *get_font_address(void) {
     return font_address;
 }
 
-static inline uint8_t bits_per_pixel() {
+static inline uint8_t bits_per_pixel(void) {
     return ((vid_mode->pm == PM_RGB0888) ? sizeof(uint32_t) : sizeof(uint16_t)) << 3;
 }
 
@@ -82,10 +82,15 @@ uint32_t bfont_set_background_color(uint32_t c) {
     return rv;
 }
 
+static int bfont_lock(void *d) {
+    (void)d;
+
+    return syscall_font_lock() == 0;
+}
+
 int lock_bfont(void) {
     /* Just make sure no outside system took the lock */
-    while(syscall_font_lock() != 0)
-        thd_pass();
+    thd_poll(bfont_lock, NULL, 0);
 
     return 0;
 }

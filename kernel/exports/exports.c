@@ -44,10 +44,23 @@ static symtab_handler_t st_arch = {
     arch_symtab
 };
 
+static symtab_handler_t st_subarch = {
+    {
+        "sym/kernel/subarch",
+        0,
+        0x00010000,
+        0,
+        NMMGR_TYPE_SYMTAB,
+        NMMGR_LIST_INIT
+    },
+    subarch_symtab
+};
+
 void export_init(void) {
     /* Add our two export tables */
     nmmgr_handler_add(&st_kern.nmmgr);
     nmmgr_handler_add(&st_arch.nmmgr);
+    nmmgr_handler_add(&st_subarch.nmmgr);
 }
 
 export_sym_t *export_lookup(const char *name) {
@@ -60,7 +73,7 @@ export_sym_t *export_lookup(const char *name) {
     nmmgrs = nmmgr_get_list();
 
     /* Go through and look at each symtab entry */
-    LIST_FOREACH(nmmgr, nmmgrs, list_ent) {
+    SLIST_FOREACH(nmmgr, nmmgrs, list_ent) {
         /* Not a symtab -> ignore */
         if(nmmgr->type != NMMGR_TYPE_SYMTAB)
             continue;
@@ -104,17 +117,18 @@ export_sym_t *export_lookup_path(const char *name, const char *path) {
 export_sym_t *export_lookup_addr(uintptr_t addr) {
     nmmgr_handler_t *nmmgr;
     nmmgr_list_t *nmmgrs;
-    int	i;
+    int i;
     symtab_handler_t *sth;
-
+    uintptr_t sym_addr;
     uintptr_t dist = ~0;
+    uintptr_t off;
     export_sym_t *best = NULL;
 
     /* Get the name manager list */
     nmmgrs = nmmgr_get_list();
 
     /* Go through and look at each symtab entry */
-    LIST_FOREACH(nmmgr, nmmgrs, list_ent) {
+    SLIST_FOREACH(nmmgr, nmmgrs, list_ent) {
         /* Not a symtab -> ignore */
         if(nmmgr->type != NMMGR_TYPE_SYMTAB)
             continue;
@@ -123,8 +137,15 @@ export_sym_t *export_lookup_addr(uintptr_t addr) {
 
         /* First look through the kernel table */
         for(i = 0; sth->table[i].name; i++) {
-            if(addr - sth->table[i].ptr < dist) {
-                dist = addr - sth->table[i].ptr;
+            sym_addr = sth->table[i].ptr;
+
+            if(sym_addr > addr)
+                continue;
+
+            off = addr - sym_addr;
+
+            if(off < dist) {
+                dist = off;
                 best = sth->table + i;
             }
         }

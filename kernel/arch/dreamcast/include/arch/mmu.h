@@ -45,10 +45,11 @@
 #ifndef __ARCH_MMU_H
 #define __ARCH_MMU_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <sys/uio.h>
 
@@ -284,6 +285,17 @@ void mmu_switch_context(mmucontext_t *context);
 void mmu_page_map(mmucontext_t *context, int virtpage, int physpage,
                   int count, page_prot_t prot, page_cache_t cache,
                   bool share, bool dirty);
+
+/** \brief   Unmap the given virtual pages.
+    \ingroup mmu
+
+    This will turn off the "valid" bit on every page specified.
+
+    \param  context         The context to modify.
+    \param  virtpage        The first virtual page to unmap.
+    \param  count           The number of sequential pages to unmap.
+*/
+void mmu_page_unmap(mmucontext_t *context, int virtpage, int count);
 
 /** \brief   Copy a chunk of data from a process' address space into a kernel
              buffer, taking into account page mappings.

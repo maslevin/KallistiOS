@@ -7,10 +7,6 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-/* XXX: KallistiOS has the wrong value for the stride bit. */
-#undef PVR_TXRFMT_STRIDE
-#define PVR_TXRFMT_STRIDE BIT(25)
-
 #define SQUARE_SIZE 64
 
 struct square_fcoords {
@@ -22,17 +18,20 @@ struct square_fcoords {
 
 static bool done;
 
-static uint32_t dr_state;
 static uint32_t fbuf_color = 0xffffffff;
 
-static void change_color(uint8_t, uint32_t btns) {
+static void change_color(uint8_t unused, uint32_t btns) {
+    (void)unused;
+
     if(btns & CONT_A)
         fbuf_color = 0xfff8f8f8;
     else
         fbuf_color = 0xffffffff;
 }
 
-static void do_exit(uint8_t, uint32_t) {
+static void do_exit(uint8_t unused1, uint32_t unused2) {
+    (void)unused1;
+    (void)unused2;
     done = 1;
 }
 
@@ -75,7 +74,7 @@ static void render_coords(const struct square_fcoords *coords, float z,
     unsigned int i;
 
     for(i = 0; i < 4; i++) {
-        vert = pvr_dr_target(dr_state);
+        vert = pvr_dr_target();
         *vert = (pvr_vertex_t){
             .flags = i == 3 ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX,
             .x = coords->x[i],
@@ -101,7 +100,7 @@ static void render_bouncing_cube(uint16_t x, uint16_t y) {
 
     pvr_poly_cxt_col(&cxt, PVR_LIST_OP_POLY);
 
-    hdr_sq = (void *)pvr_dr_target(dr_state);
+    hdr_sq = pvr_dr_target();
     pvr_poly_compile(hdr_sq, &cxt);
     pvr_dr_commit(hdr_sq);
 
@@ -144,7 +143,7 @@ static void render_back_buffer_step1(pvr_ptr_t fake_tex) {
 
     cxt.txr.alpha = PVR_TXRALPHA_ENABLE;
 
-    hdr_sq = (void *)pvr_dr_target(dr_state);
+    hdr_sq = pvr_dr_target();
     pvr_poly_compile(hdr_sq, &cxt);
     pvr_dr_commit(hdr_sq);
 
@@ -157,7 +156,7 @@ static void render_back_buffer_step2(pvr_ptr_t frontbuf, bool hi_chip) {
     float uoffset;
 
     pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
-                     PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED | PVR_TXRFMT_STRIDE,
+                     PVR_TXRFMT_RGB565 | PVR_TXRFMT_NONTWIDDLED | PVR_TXRFMT_X32_STRIDE,
                      1024, 1024, frontbuf, PVR_FILTER_NEAREST);
 
     if(fbuf_color == 0xffffffff) {
@@ -173,7 +172,7 @@ static void render_back_buffer_step2(pvr_ptr_t frontbuf, bool hi_chip) {
     cxt.blend.dst = PVR_BLEND_ZERO;
     cxt.blend.src = PVR_BLEND_DESTALPHA;
 
-    hdr_sq = (void *)pvr_dr_target(dr_state);
+    hdr_sq = pvr_dr_target();
     pvr_poly_compile(hdr_sq, &cxt);
     pvr_dr_commit(hdr_sq);
 
@@ -184,7 +183,7 @@ static void render_back_buffer_step2(pvr_ptr_t frontbuf, bool hi_chip) {
     cxt.blend.dst = PVR_BLEND_ONE;
     cxt.blend.src = PVR_BLEND_INVDESTALPHA;
 
-    hdr_sq = (void *)pvr_dr_target(dr_state);
+    hdr_sq = pvr_dr_target();
     pvr_poly_compile(hdr_sq, &cxt);
     pvr_dr_commit(hdr_sq);
 
@@ -204,9 +203,14 @@ int main(int argc, char **argv) {
 
     pvr_init_defaults();
 
-    /* Set the stride length for strided textures.
-     * Unit is a set of 32 pixels, hence the /32. */
-    PVR_SET(PVR_TEXTURE_MODULO, 640 / 32);
+    /* Set the stride length for strided textures. */
+    pvr_txr_set_stride(640);
+
+    /* The default vertical scale is actually 0.999f when a regular A/V cable
+     * is plugged. This won't work properly here, as the error will accumulate
+     * in the framebuffer, causing a rather neat fading effect towards the
+     * center (but not what we want in this example). */
+    pvr_set_vertical_scale(1.0f);
 
     fake_tex = pvr_mem_malloc(sizeof(fake_tex_data));
     pvr_txr_load(fake_tex_data, fake_tex, sizeof(fake_tex_data));

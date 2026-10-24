@@ -1,8 +1,15 @@
 #include <kos.h>
+
+/* Allow both old kos-ports location and standard */
+#if __has_include("modplug/stdafx.h")
 #include <modplug/stdafx.h>
 #include <modplug/sndfile.h>
+#else
+#include <libmodplug/stdafx.h>
+#include <libmodplug/sndfile.h>
+#endif
 
-uint16 sound_buffer[65536] = {0};
+uint16_t sound_buffer[65536] = {0};
 CSoundFile *soundfile;
 
 void *mod_callback(snd_stream_hnd_t hnd, int len, int * actual) {
@@ -24,8 +31,8 @@ void *mod_callback(snd_stream_hnd_t hnd, int len, int * actual) {
 int main(int argc, char **argv) {
     maple_device_t *cont;
     cont_state_t *state;
-    uint8 *mod_buffer;
-    uint32 hnd;
+    uint8_t *mod_buffer;
+    uint32_t hnd;
     char filename[] = "/rd/test.s3m";
 
     printf("modplug_test beginning\n");
@@ -40,22 +47,25 @@ int main(int argc, char **argv) {
     }
 
     printf("Filesize: %i\n", fs_total(hnd));
-    mod_buffer = (uint8 *)malloc(fs_total(hnd));
+    mod_buffer = (uint8_t *)malloc(fs_total(hnd));
 
     if(!mod_buffer) {
         printf("Not enough memory\n");
+        fs_close(hnd);
         return 0;
     }
 
     printf("Memory allocated\n");
 
-    if((size_t)fs_read(hnd, mod_buffer, fs_total(hnd)) != fs_total(hnd)) {
+    if(fs_read(hnd, mod_buffer, fs_total(hnd)) != fs_total(hnd)) {
         printf("Read error\n");
+        fs_close(hnd);
         free(mod_buffer);
         return 0;
     }
 
     printf("File read\n");
+    fs_close(hnd);
 
     soundfile = new CSoundFile;
 
@@ -79,9 +89,6 @@ int main(int argc, char **argv) {
     printf("Type: %li\n", soundfile->GetType());
     printf("Title: %s\n", soundfile->GetTitle());
 
-    /*fs_close(hnd);
-    free(mod_buffer);*/
-
     snd_stream_hnd_t shnd = snd_stream_alloc(mod_callback, SND_STREAM_BUFFER_MAX);
     snd_stream_start(shnd, 44100, 1);
 
@@ -98,9 +105,10 @@ int main(int argc, char **argv) {
 
         snd_stream_poll(shnd);
 
-        timer_spin_sleep(10);
+        thd_sleep(10);
     }
 
+    free(mod_buffer);
     delete soundfile;
 
     snd_stream_destroy(shnd);

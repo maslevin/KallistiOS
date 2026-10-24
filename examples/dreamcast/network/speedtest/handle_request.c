@@ -9,13 +9,13 @@
 #include "speedtest.h"
 
 /*
-   This file defines the handle_request function, which processes HTTP requests 
-   received by the speed test server. It parses the request, determines the HTTP 
-   method (GET or POST), and routes the request to the appropriate handler based 
-   on the requested path. It supports GET requests to serve files such as 
-   index.html and handles download and upload test endpoints to measure network 
+   This file defines the handle_request function, which processes HTTP requests
+   received by the speed test server. It parses the request, determines the HTTP
+   method (GET or POST), and routes the request to the appropriate handler based
+   on the requested path. It supports GET requests to serve files such as
+   index.html and handles download and upload test endpoints to measure network
    speed.
- 
+
    Key paths:
    - "/": serves the speed test HTML page (index.html).
    - "/download-test?size=": initiates a download test of the requested size.
@@ -29,7 +29,7 @@ bool prefix_match(const char *path, const char *pattern);
 int send_ok(http_state_t *h, const char *ct);
 void send_code(int socket, uint16_t code, const char *message);
 
-#define BUFSIZE 1024
+#define BUFSIZE 4096
 #define REQUEST_LINE_SIZE 160
 #define HEADER_BUF_SIZE  512
 
@@ -37,8 +37,9 @@ void *handle_request(void *p) {
     char request_line[REQUEST_LINE_SIZE] = {0};
     char *buf_ptr = request_line;
     char *path_end;
-    size_t total_bytes = 0;
+    ssize_t total_bytes = 0;
     http_state_t *hr = (http_state_t *)p;
+    char response_buf[BUFSIZE];
 
     /* Read the max we expect the request line to be */
     total_bytes = recv(hr->socket, request_line, REQUEST_LINE_SIZE-1, MSG_NONE);
@@ -70,8 +71,6 @@ void *handle_request(void *p) {
     hr->path = buf_ptr;
     buf_ptr = path_end + 1;
 
-    printf("%s\n", hr->path);
-
     if(hr->method == METHOD_POST) {
         char *content_length_key = "Content-Length: ";
         char *cl_key_ptr = content_length_key;
@@ -85,8 +84,6 @@ void *handle_request(void *p) {
         char *buf_start = request_line;
         bool got_content_length = false;
         size_t bytes_left = total_bytes - (buf_ptr - buf_start);
-
-        printf("RL: %s\n", buf_ptr);
 
         /* Look for Content-Length header(optional) and start of the body */
         while(true) {
@@ -105,7 +102,7 @@ find_length:
                             if(found) {
                                 buf_ptr = found;
                                 got_content_length = true;
-                                
+
                                 goto find_body;
                             }
                         }
@@ -116,7 +113,7 @@ find_length:
                             buf_ptr--;
                             bytes_left++;
                             /* Fall through to find_body */
-                        } 
+                        }
                         else /* bytes_left == 0 */
                             goto refresh_buffer;
                     }
@@ -131,7 +128,7 @@ find_body:
                         hr->read_content_length = total_bytes - (hr->body - buf_start);
                         if(got_content_length)
                             hr->rem_content_length -= hr->read_content_length;
-                        
+
                         goto done_parsing;
                     }
                     else if(bytes_left > 0) /* Start over */ {
@@ -172,9 +169,8 @@ refresh_buffer:
     }
 
 done_parsing:
-    char response_buf[BUFSIZE];
     if(hr->method == METHOD_GET) {
-        file_t file = -1;
+        file_t file = FILEHND_INVALID;
         uint32_t offset;
         int cnt;
         int wrote;
@@ -237,7 +233,9 @@ done_parsing:
     else { /* POST */
         if(exact_match(hr->path, "/upload-test")) {
             while(hr->rem_content_length) {
-                total_bytes = recv(hr->socket, response_buf, HEADER_BUF_SIZE - 1, MSG_NONE);
+                total_bytes = recv(hr->socket, response_buf, BUFSIZE, MSG_NONE);
+                if(total_bytes <= 0)
+                    break;
 
                 hr->rem_content_length -= total_bytes;
             }

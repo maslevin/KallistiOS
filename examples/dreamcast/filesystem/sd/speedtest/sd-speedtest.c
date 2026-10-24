@@ -14,14 +14,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <errno.h>
+#include <time.h>
 
 #include <dc/sd.h>
 #include <dc/maple.h>
 #include <dc/maple/controller.h>
-
-#include <arch/arch.h>
-#include <arch/timer.h>
 
 #include <kos/init.h>
 #include <kos/dbgio.h>
@@ -48,7 +45,7 @@ static void __attribute__((__noreturn__)) wait_exit(void) {
 
             if(state)   {
                 if(state->buttons)
-                    arch_exit();
+                    exit(0);
             }
         }
     }
@@ -60,43 +57,42 @@ static int run_speed_test(sd_interface_t interface, bool check_crc) {
         .check_crc = check_crc
     };
     kos_blockdev_t sd_dev;
-    uint64_t begin, end, timer, average;
-    uint64_t sum = 0;
+    clock_t begin, end, timer, average, sum = 0;
     uint8_t pt;
     int i;
 
     const char *interface_name = (interface == SD_IF_SCI) ? "SCI-SPI" : "SCIF-SPI";
 
     while(sd_init_ex(&params)) {
-        dbglog(DBG_DEBUG, "Could not initialize the SD card on %s interface.\n", interface_name);
+        dbglog(DBG_ERROR, "Could not initialize the SD card on %s interface.\n", interface_name);
         return -1;
     }
 
     /* Grab the block device for the first partition on the SD card. Note that
        you must have the SD card formatted with an MBR partitioning scheme. */
     if(sd_blockdev_for_partition(0, &sd_dev, &pt)) {
-        dbglog(DBG_DEBUG, "Could not find the first partition on the SD card!\n");
+        dbglog(DBG_ERROR, "Could not find the first partition on the SD card!\n");
         sd_shutdown();
         return -1;
     }
 
     for(i = 0; i < 10; i++) {
-        begin = timer_ms_gettime64();
+        begin = clock();
 
         if(sd_dev.read_blocks(&sd_dev, 0, TEST_BLOCK_COUNT, tbuf)) {
-            dbglog(DBG_DEBUG, "couldn't read block: %s\n", strerror(errno));
+            dbglog(DBG_ERROR, "couldn't read block: %s\n", strerror(errno));
             sd_shutdown();
             return -1;
         }
 
-        end = timer_ms_gettime64();
+        end = clock();
         timer = end - begin;
         sum += timer;
     }
 
-    average = sum / 10;
+    average = (sum / 10) / (CLOCKS_PER_SEC / 1000);
 
-    dbglog(DBG_DEBUG, "%s: read average took %llu ms (%.3f KB/sec)\n",
+    dbglog(DBG_INFO, "%s: read average took %lu ms (%.3f KB/sec)\n",
            interface_name, average, (512 * TEST_BLOCK_COUNT) / ((double)average));
 
     sd_shutdown();
@@ -106,27 +102,27 @@ static int run_speed_test(sd_interface_t interface, bool check_crc) {
 int main(int argc, char *argv[]) {
     // dbgio_dev_select("fb");
 
-    dbglog(DBG_DEBUG, "Starting SD card speed tests\n");
+    dbglog(DBG_INFO, "Starting SD card speed tests\n");
 
-    dbglog(DBG_DEBUG, "Testing SCI-SPI interface with CRC disabled\n");
+    dbglog(DBG_INFO, "Testing SCI-SPI interface with CRC disabled\n");
     if (run_speed_test(SD_IF_SCI, false) == 0) {
-        dbglog(DBG_DEBUG, "Testing SCI-SPI interface with CRC enabled\n");
+        dbglog(DBG_INFO, "Testing SCI-SPI interface with CRC enabled\n");
         run_speed_test(SD_IF_SCI, true);
     }
     else {
-        dbglog(DBG_DEBUG, "Skipping SCI-SPI interface with CRC enabled\n");
+        dbglog(DBG_INFO, "Skipping SCI-SPI interface with CRC enabled\n");
     }
 
-    dbglog(DBG_DEBUG, "Testing SCIF-SPI interface with CRC disabled\n");
+    dbglog(DBG_INFO, "Testing SCIF-SPI interface with CRC disabled\n");
     if (run_speed_test(SD_IF_SCIF, false) == 0) {
-        dbglog(DBG_DEBUG, "Testing SCIF-SPI interface with CRC enabled\n");
+        dbglog(DBG_INFO, "Testing SCIF-SPI interface with CRC enabled\n");
         run_speed_test(SD_IF_SCIF, true);
     }
     else {
-        dbglog(DBG_DEBUG, "Skipping SCIF-SPI interface with CRC enabled\n");
+        dbglog(DBG_INFO, "Skipping SCIF-SPI interface with CRC enabled\n");
     }
 
-    dbglog(DBG_DEBUG, "All tests completed\n");
+    dbglog(DBG_INFO, "All tests completed\n");
 
     wait_exit();
     return 0;

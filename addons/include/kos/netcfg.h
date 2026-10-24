@@ -26,7 +26,7 @@
 #include <sys/cdefs.h>
 __BEGIN_DECLS
 
-#include <arch/types.h>
+#include <stdint.h>
 
 /** \defgroup   netcfg          Configuration
     \brief                      KOS Network Configuration Management
@@ -83,11 +83,11 @@ typedef struct netcfg {
     */
     int method;
 
-    uint32 ip;              /**< \brief IPv4 address of the console */
-    uint32 gateway;         /**< \brief IPv4 address of the gateway/router. */
-    uint32 netmask;         /**< \brief Network mask for the local net. */
-    uint32 broadcast;       /**< \brief Broadcast address for the local net. */
-    uint32 dns[2];          /**< \brief IPv4 address of the DNS servers. */
+    uint32_t ip;            /**< \brief IPv4 address of the console */
+    uint32_t gateway;       /**< \brief IPv4 address of the gateway/router. */
+    uint32_t netmask;       /**< \brief Network mask for the local net. */
+    uint32_t broadcast;     /**< \brief Broadcast address for the local net. */
+    uint32_t dns[2];        /**< \brief IPv4 address of the DNS servers. */
     char hostname[64];      /**< \brief DNS/DHCP hostname. */
     char email[64];         /**< \brief E-Mail address. */
     char smtp[64];          /**< \brief SMTP server address. */
@@ -111,10 +111,10 @@ typedef struct netcfg {
 
     \param  fn          The file to read the configuration from.
     \param  out         Buffer to store the parsed configuration.
-    
+
     \return             0 on success, <0 on failure.
 */
-int netcfg_load_from(const char * fn, netcfg_t * out);
+int netcfg_load_from(const char *fn, netcfg_t *out);
 
 /** \brief   Load network configuration from the Dreamcast's flashrom.
     \ingroup netcfg
@@ -126,25 +126,25 @@ int netcfg_load_from(const char * fn, netcfg_t * out);
                         the PlanetWeb browser at all.
 
     \param  out         Buffer to store the parsed configuration.
-    
+
     \return             0 on success, <0 on failure.
 */
-int netcfg_load_flash(netcfg_t * out);
+int netcfg_load_flash(netcfg_t *out);
 
 /** \brief   Load network configuration.
     \ingroup netcfg
 
     This function loads the network configuration data, searching in multiple
     locations to attempt to find a file with a stored configuration. This
-    function will attempt to read the configuration from each VMU first (from 
+    function will attempt to read the configuration from each VMU first (from
     a file named net.cfg), then it will try the flashrom, followed by the
     current working directory, and lastly the root of the CD.
 
     \param  out         Buffer to store the parsed configuration.
-    
+
     \return             0 on success, <0 on failure.
 */
-int netcfg_load(netcfg_t * out);
+int netcfg_load(netcfg_t *out);
 
 /** \brief   Save network configuration to a file.
     \ingroup netcfg
@@ -155,10 +155,10 @@ int netcfg_load(netcfg_t * out);
 
     \param  fn          The file to save to.
     \param  cfg         The configuration to save.
-    
+
     \return             0 on success, <0 on failure.
 */
-int netcfg_save_to(const char * fn, const netcfg_t * cfg);
+int netcfg_save_to(const char *fn, const netcfg_t *cfg);
 
 /** \brief   Save network configuration to the first available VMU.
     \ingroup netcfg
@@ -167,10 +167,10 @@ int netcfg_save_to(const char * fn, const netcfg_t * cfg);
     will not retry if the first VMU doesn't have enough space to hold the file.
 
     \param  cfg         The configuration to save.
-    
+
     \return             0 on success, <0 on failure.
 */
-int netcfg_save(const netcfg_t * cfg);
+int netcfg_save(const netcfg_t *cfg);
 
 __END_DECLS
 

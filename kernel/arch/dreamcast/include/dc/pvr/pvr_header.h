@@ -18,8 +18,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
+
+#include <dc/pvr/pvr_regs.h>
 
 /** \defgroup pvr_primitives_headers Headers
     \brief                           Structs relative to PVR headers
@@ -59,9 +61,12 @@ typedef enum pvr_list_type {
     PVR_LIST_OP_POLY,           /**< Opaque polygon list */
     PVR_LIST_OP_MOD,            /**< Opaque modifier list */
     PVR_LIST_TR_POLY,           /**< Translucent polygon list */
-    PVR_LIST_TR_MOD,            /**< Translucent modifier list*/
+    PVR_LIST_TR_MOD,            /**< Translucent modifier list */
     PVR_LIST_PT_POLY,           /**< Punch-thru polygon list */
-} pvr_list_type_t;
+    PVR_LIST_NONE = -1          /**< Used internally to signal unset values */
+} pvr_list_t;
+
+#define pvr_list_type_t pvr_list_t
 
 /** \brief   Primitive culling modes
 
@@ -214,7 +219,7 @@ typedef uint32_t pvr_txr_ptr_t;
     \return                 The pre-processed texture address
 */
 static inline pvr_txr_ptr_t to_pvr_txr_ptr(pvr_ptr_t addr) {
-    return ((uint32_t)addr & 0x00fffff8) >> 3;
+    return ((uint32_t)addr & (PVR_RAM_SIZE - 1)) >> 3;
 }
 
 /** \brief Get texture address form VRAM address
@@ -240,7 +245,7 @@ typedef struct pvr_poly_hdr_cmd {
     pvr_strip_len_t strip_len    :2; /* 19-18 */ /**< Triangle strips length (if non-auto) */
     uint32_t                     :3; /* 22-20 */
     bool auto_strip_len          :1; /* 23 */    /**< Auto select triangle strips length */
-    pvr_list_type_t list_type    :3; /* 26-24 */ /**< Render list to use */
+    pvr_list_t list_type         :3; /* 26-24 */ /**< Render list to use */
     uint32_t                     :1; /* 27 */
     bool strip_end               :1; /* 28 */    /**< Mark an end-of-strip */
     pvr_hdr_type_t hdr_type      :3; /* 31-29 */ /**< Header type */

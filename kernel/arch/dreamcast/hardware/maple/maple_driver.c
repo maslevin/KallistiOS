@@ -8,15 +8,16 @@
 #include <stdlib.h>
 #include <dc/maple.h>
 
-void maple_attach_callback(uint32 functions, maple_attach_callback_t cb) {
+void maple_attach_callback(uint32_t functions, maple_user_callback_t cb, void *user_data) {
     maple_driver_t *i;
 
     if(!functions)
-        functions = 0xffffffff;
+        functions = MAPLE_FUNC_ANY;
 
     LIST_FOREACH(i, &maple_state.driver_list, drv_list) {
         if(i->functions & functions) {
             i->user_attach = cb;
+            i->user_attach_data = user_data;
             functions &= ~i->functions;
 
             if(!functions)
@@ -25,15 +26,16 @@ void maple_attach_callback(uint32 functions, maple_attach_callback_t cb) {
     }
 }
 
-void maple_detach_callback(uint32 functions, maple_detach_callback_t cb) {
+void maple_detach_callback(uint32_t functions, maple_user_callback_t cb, void *user_data) {
     maple_driver_t *i;
 
     if(!functions)
-        functions = 0xffffffff;
+        functions = MAPLE_FUNC_ANY;
 
     LIST_FOREACH(i, &maple_state.driver_list, drv_list) {
         if(i->functions & functions) {
             i->user_detach = cb;
+            i->user_detach_data = user_data;
             functions &= ~i->functions;
 
             if(!functions)
@@ -46,9 +48,6 @@ void maple_detach_callback(uint32 functions, maple_detach_callback_t cb) {
 int maple_driver_reg(maple_driver_t *driver) {
     /* Don't add two drivers for the same function */
     maple_driver_t *i;
-
-    if(driver->drv_list.le_prev)
-        return -1;
 
     LIST_FOREACH(i, &maple_state.driver_list, drv_list)
         if(i->functions & driver->functions)
@@ -72,7 +71,7 @@ int maple_driver_attach(maple_frame_t *det) {
     maple_response_t    *resp;
     maple_devinfo_t     *devinfo;
     maple_device_t      *dev = maple_state.ports[det->dst_port].units[det->dst_unit];
-    bool                attached = false;
+    bool                dev_allocated = false;
 
     /* Resolve some pointers first */
     resp = (maple_response_t *)det->recv_buf;
@@ -89,12 +88,11 @@ int maple_driver_attach(maple_frame_t *det) {
                 if(!dev)
                     return 1;
 
-                maple_state.ports[det->dst_port].units[det->dst_unit] = dev;
-
                 /* Add the basics for the initial version of the struct */
                 dev->port = det->dst_port;
                 dev->unit = det->dst_unit;
                 dev->frame.state = MAPLE_FRAME_VACANT;
+                dev_allocated = true;
             }
 
             memcpy(&dev->info, devinfo, sizeof(maple_devinfo_t));
@@ -102,40 +100,36 @@ int maple_driver_attach(maple_frame_t *det) {
             /* Now lets allocate a new status buffer */
             if(i->status_size && !dev->status) {
                 dev->status = calloc(1, i->status_size);
-                if(!dev->status)
+                if(!dev->status) {
+                    /* If dev was freshly allocated, don't keep it */
+                    if(dev_allocated)
+                        free(dev);
                     return 1;
+                }
             }
 
-            if(!i->status_size || dev->status) {
-                /* Try to attach if we need to then break out. */
-                if(!(i->attach) || (i->attach(i, dev) >= 0)) {
-                    attached = true;
-                    break;
-                }
+            if(dev_allocated)
+                maple_state.ports[det->dst_port].units[det->dst_unit] = dev;
+
+            /* Try to attach if we need to then finish up. */
+            if(!i->attach || (i->attach(i, dev) >= 0)) {
+                dev->drv = i;
+                dev->valid = MAPLE_DEV_VALID_TIMEOUT;
+
+                if(i->user_attach)
+                    i->user_attach(dev, i->user_attach_data);
+
+                return 0;
+            }
+            else {
+                /* We allocated a status, but couldn't attach */
+                free(dev->status);
+                dev->status = NULL;
             }
         }
     }
 
-    if(!dev)
-        return -1;
-
-    /* Did we get any hits? */
-    if(!attached) {
-        free(dev->status);
-        dev->status = NULL;
-
-        return -1;
-    }
-
-    /* Finish setting stuff up */
-    dev->drv = i;
-    dev->status_valid = 0;
-    dev->valid = true;
-
-    if(i->user_attach)
-        i->user_attach(dev);
-
-    return 0;
+    return -1;
 }
 
 /* Detach an attached maple device */
@@ -145,20 +139,19 @@ int maple_driver_detach(int p, int u) {
     if(!dev)
         return -1;
 
-    dev->valid = false;
+    dev->valid = 0;
 
     if(dev->drv) {
         if(dev->drv->user_detach)
-            dev->drv->user_detach(dev);
+            dev->drv->user_detach(dev, dev->drv->user_detach_data);
+
         if(dev->drv->detach)
             dev->drv->detach(dev->drv, dev);
-    }
 
-    dev->status_valid = 0;
-
-    if(dev->drv->status_size) {
-        free(dev->status);
-        dev->status = NULL;
+        if(dev->drv->status_size) {
+            free(dev->status);
+            dev->status = NULL;
+        }
     }
 
     dev->probe_mask = 0;
@@ -169,12 +162,10 @@ int maple_driver_detach(int p, int u) {
 
 /* For each device which the given driver controls, call the callback */
 int maple_driver_foreach(maple_driver_t *drv, int (*callback)(maple_device_t *)) {
-    int     p, u;
-    maple_device_t  *dev;
 
-    for(p = 0; p < MAPLE_PORT_COUNT; p++) {
-        for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
-            dev = maple_enum_dev(p, u);
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; p++) {
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; u++) {
+            maple_device_t *dev = maple_enum_dev(p, u);
 
             if(dev && dev->drv == drv && !dev->frame.queued)
                 if(callback(dev) < 0)

@@ -25,13 +25,13 @@
 
 void netcfg_vmuify(const char *filename_in, const char *filename_out) {
     int fd, pkg_size;
-    uint8   *buf;
-    uint8   *pkg_out;
+    uint8_t  *buf;
+    uint8_t  *pkg_out;
     vmu_pkg_t pkg;
 
     dbgp("Opening source file\n");
     fd = fs_open(filename_in, O_RDONLY);
-    buf = (uint8 *) malloc(fs_total(fd));
+    buf = (uint8_t *) malloc(fs_total(fd));
     if(buf == NULL)
         return;
 
@@ -69,7 +69,7 @@ void netcfg_vmuify(const char *filename_in, const char *filename_out) {
    this fails, we try reading settings from the current dir in the VFS,
    and then from the root of the CD. If that fails, we give up. */
 
-int netcfg_load_from(const char * fn, netcfg_t * out) {
+int netcfg_load_from(const char *fn, netcfg_t *out) {
     FILE * f;
     char buf[64], *b;
     int l;
@@ -189,7 +189,7 @@ int netcfg_load_from(const char * fn, netcfg_t * out) {
     return 0;
 }
 
-int netcfg_load_flash(netcfg_t * out) {
+int netcfg_load_flash(netcfg_t *out) {
     flashrom_ispcfg_t cfg;
 
     if(flashrom_get_ispcfg(&cfg) < 0)
@@ -256,15 +256,15 @@ int netcfg_load_flash(netcfg_t * out) {
     return 0;
 }
 
-int netcfg_load(netcfg_t * out) {
+int netcfg_load(netcfg_t *out) {
+    const dirent_t *d;
     file_t f;
-    dirent_t * d;
     char buf[64];
 
     /* Scan for VMUs */
     f = fs_open("/vmu", O_RDONLY | O_DIR);
 
-    if(f >= 0) {
+    if(f != FILEHND_INVALID) {
         for(; ;) {
             d = fs_readdir(f);
 
@@ -305,7 +305,7 @@ int netcfg_load(netcfg_t * out) {
     return -1;
 }
 
-int netcfg_save_to(const char * fn, const netcfg_t * cfg) {
+int netcfg_save_to(const char *fn, const netcfg_t *cfg) {
     FILE * f;
     char buf[256];
 
@@ -333,7 +333,7 @@ int netcfg_save_to(const char * fn, const netcfg_t * cfg) {
 
 #define WRITESTR(fmt, data) \
     sprintf(buf, fmt, data); \
-    if (fwrite(buf, strlen(buf), 1, f) != 1) \
+    if(fwrite(buf, strlen(buf), 1, f) != 1) \
         goto error;
 
     WRITESTR("driver=%s\n", cfg->driver);
@@ -383,15 +383,15 @@ error:
     return -1;
 }
 
-int netcfg_save(const netcfg_t * cfg) {
+int netcfg_save(const netcfg_t *cfg) {
+    const dirent_t *d;
     file_t f;
-    dirent_t * d;
     char buf[64];
 
     /* Scan for a VMU */
     f = fs_open("/vmu", O_RDONLY | O_DIR);
 
-    if(f < 0)
+    if(f == FILEHND_INVALID)
         return -1;
 
     d = fs_readdir(f);

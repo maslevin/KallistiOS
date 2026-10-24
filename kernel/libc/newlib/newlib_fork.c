@@ -5,10 +5,12 @@
 
 */
 
-#include <sys/reent.h>
+#include <reent.h>
 #include <errno.h>
 
-int _fork_r(struct _reent * reent) {
-    reent->_errno = EAGAIN;
+int _fork_r(struct _reent *reent) {
+    (void)reent;
+
+    errno = EAGAIN;
     return -1;
 }

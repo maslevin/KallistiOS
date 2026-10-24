@@ -19,7 +19,7 @@
 #ifndef __KOS_NMMGR_H
 #define __KOS_NMMGR_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 #include <stdint.h>
@@ -39,7 +39,7 @@ struct nmmgr_handler;
 
     Contrary to what doxygen may think, this is not a function.
 */
-typedef LIST_HEAD(nmmgr_list, nmmgr_handler) nmmgr_list_t;
+typedef SLIST_HEAD(nmmgr_list, nmmgr_handler) nmmgr_list_t;
 
 /** \brief   List entry initializer for static structs.
     \ingroup system_namemgr
@@ -64,14 +64,14 @@ typedef struct nmmgr_handler {
     uint32_t  version;        /* Version code */
     uint32_t  flags;          /* Bitmask of flags */
     uint32_t  type;           /* Type of handler */
-    LIST_ENTRY(nmmgr_handler)   list_ent;   /* Linked list entry */
+    SLIST_ENTRY(nmmgr_handler)  list_ent;   /* Linked list entry */
 } nmmgr_handler_t;
 
 /** \brief   Alias handler interface.
     \ingroup system_namemgr
 
-    The smallest possible extension of name handler, it has its own name 
-    but holds a pointer to a full handler of the appropriate type. This 
+    The smallest possible extension of name handler, it has its own name
+    but holds a pointer to a full handler of the appropriate type. This
     prevents the need to duplicate large vfs structures.
 
 */
@@ -88,7 +88,7 @@ typedef struct alias_handler {
    mostly-compatible but newer/older revisions of the implementing code. */
 
 /* Flag bits */
-/** \brief  This structure must be freed when removed. 
+/** \brief  This structure must be freed when removed.
     \ingroup system_namemgr
 */
 #define NMMGR_FLAGS_NEEDSFREE   0x00000001
@@ -132,14 +132,14 @@ typedef struct alias_handler {
     This function will retrieve a name handler by its pathname.
 
     \param  name            The handler to look up
-    
+
     \return                 The handler, or NULL on failure.
 */
 nmmgr_handler_t * nmmgr_lookup(const char *name);
 
 /** \brief   Get the head element of the name list.
     \ingroup system_namemgr
-    
+
     \warning
     DO NOT MODIFY THE VALUE RETURNED BY THIS FUNCTION! In fact, don't ever call
     this function.
@@ -154,7 +154,7 @@ nmmgr_list_t * nmmgr_get_list(void);
     This function adds a new name handler to the list in the kernel.
 
     \param  hnd             The handler to add
-    
+
     \retval 0               On success
 */
 int nmmgr_handler_add(nmmgr_handler_t *hnd);
@@ -165,7 +165,7 @@ int nmmgr_handler_add(nmmgr_handler_t *hnd);
     This function removes a name handler from the list in the kernel.
 
     \param  hnd             The handler to remove
-    
+
     \retval 0               On success
     \retval -1              If the handler wasn't found
 */

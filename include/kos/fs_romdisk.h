@@ -22,24 +22,24 @@
     \warning
     An embedded romdisk image is linked to your executable and cannot be evicted from
     system RAM!
-    
+
     Mounting additional images that you load from some other sources (such as a modified BIOS)
     on whatever mountpoint you want, is also possible. Using fs_romdisk_mount() and passing a
     pointer to the location of a romdisk image will mount it.
 
-    \remark 
+    \remark
     Mounted images will reside in system RAM for as long as your program is running
     or until you unmount them with fs_romdisk_unmount(). The size of your generated
-    ROMFS image must be kept below 16MB, with 14MB being the maximum recommended size, 
+    ROMFS image must be kept below 16MB, with 14MB being the maximum recommended size,
     as your binary will also reside in RAM and you need to leave some memory available
     for it. Generating files larger than the available RAM will lead to system crashes.
-    
+
     A romdisk filesystem image can be created by adding "KOS_ROMDISK_DIR=" to your Makefile
     and pointing it to the directory contaning all the resources you wish to have embeded in
     filesystem image. A rule to create the image is provided in the rules provided in Makefile.rules,
-    the created object file must be linked with your binary file by adding romdisk.o to your 
+    the created object file must be linked with your binary file by adding romdisk.o to your
     list of objects.
-    
+
     \see INIT_FS_ROMDISK
     \see KOS_INIT_FLAGS()
 
@@ -49,10 +49,11 @@
 #ifndef __KOS_FS_ROMDISK_H
 #define __KOS_FS_ROMDISK_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
+#include <stdbool.h>
+#include <stdint.h>
 __BEGIN_DECLS
 
-#include <arch/types.h>
 #include <kos/fs.h>
 
 /** \defgroup vfs_romdisk   Romdisk
@@ -81,22 +82,22 @@ void fs_romdisk_shutdown(void);
 
     \param  mountpoint      The directory to mount this romdisk on
     \param  img             The ROMFS image
-    \param  own_buffer      If 0, you are still responsible for img, and must
-                            free it if appropriate. If non-zero, img will be
+    \param  own_buffer      If false, you are still responsible for img, and
+                            must free it if appropriate. If true, img will be
                             freed when it is unmounted
     \retval 0               On success
     \retval -1              If fs_romdisk_init not called
     \retval -2              If img is invalid
     \retval -3              If a malloc fails
 */
-int fs_romdisk_mount(const char * mountpoint, const uint8 *img, int own_buffer);
+int fs_romdisk_mount(const char * mountpoint, const uint8_t *img, bool own_buffer);
 
 /** \brief  Unmount a ROMFS image.
 
     This function unmounts a ROMFS image that has been previously mounted with
     fs_romdisk_mount(). This function does not check for open files on the fs,
     so make sure that all files have been closed before calling it. If the VFS
-    owns the buffer (own_buffer was non-zero when you called the mount function)
+    owns the buffer (own_buffer was true when you called the mount function)
     then this function will also free the buffer.
 
     \param  mountpoint      The ROMFS to unmount

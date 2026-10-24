@@ -26,17 +26,30 @@
    SOFTWARE.
 */
 
+#include <stdio.h>
+#include <inttypes.h>
 #include <assert.h>
 #include <kos.h>
 #include <kos/img.h>
+
+/* Allow both old kos-ports location and standard */
+#if __has_include("mruby/mruby.h")
 #include <mruby/mruby.h>
+#include <mruby/mruby/array.h>
 #include <mruby/mruby/internal.h>
-#include <mruby/mruby/data.h>
 #include <mruby/mruby/string.h>
-#include <mruby/mruby/error.h>
-#include <stdio.h>
-#include <inttypes.h>
+#else
+#include <mruby.h>
+#include <mruby/array.h>
+#include <mruby/internal.h>
+#include <mruby/string.h>
+#endif
+
+#if __has_include("png/png.h")
 #include <png/png.h>
+#else
+#include <png.h>
+#endif
 
 // Convert ARGB1555 to RGB565 - drops the A bit and G is exapanded to 6 bits
 #define CONV1555TO565(colour) ( (((colour) & 0x7C00) << 1) | (((colour) & 0x03E0) << 1) | ((colour) & 0x001F) )
@@ -66,7 +79,7 @@ static mrb_value read_whole_txt_file(mrb_state *mrb, mrb_value self) {
   path = mrb_str_to_cstr(mrb, m_path);
   f = fs_open(path, O_RDONLY);
 
-  if(f < 0) {
+  if(f == FILEHND_INVALID) {
     printf("Failed to open %s.\n", path);
     return mrb_nil_value();
   }
@@ -94,7 +107,7 @@ mrb_value get_button_state(mrb_state *mrb, mrb_value self) {
   return mrb_nil_value();
 }
 
-mrb_value check_btn(mrb_state *mrb, mrb_value self, uint16 target) {
+mrb_value check_btn(mrb_state *mrb, mrb_value self, uint16_t target) {
   struct mrb_value state;
   mrb_get_args(mrb, "i", &state);
 
@@ -135,7 +148,7 @@ mrb_value draw_str(mrb_state *mrb, mrb_value self) {
   printf("KOS draw_str: %s\n", unwrapped_content);
 
   // assuming 16 bit colours
-  bfont_draw_str_ex(vram_s + x + (y * PX_PER_LINE), PX_PER_LINE, PACK_PIXEL(r, g, b), 0x00000000, (sizeof (uint16)) << 3, bg_on, unwrapped_content);
+  bfont_draw_str_ex(vram_s + x + (y * PX_PER_LINE), PX_PER_LINE, PACK_PIXEL(r, g, b), 0x00000000, (sizeof (uint16_t)) << 3, bg_on, unwrapped_content);
 
   return mrb_nil_value();
 }
@@ -157,7 +170,6 @@ void _display_png_file(char *file_path, int x1, int y1, int x2, int y2) {
   pvr_poly_hdr_t hdr;
   pvr_vertex_t vert;
 
-  pvr_wait_ready();
   pvr_scene_begin();
 
   pvr_list_begin(PVR_LIST_OP_POLY);

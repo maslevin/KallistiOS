@@ -26,7 +26,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <arch/arch.h>
+#include <kos/init.h>
 #include <kos/net.h>
 #include <kos/thread.h>
 #include <kos/dbgio.h>
@@ -41,7 +41,7 @@ KOS_INIT_FLAGS(INIT_DEFAULT | INIT_NET);
 
 int main(int argc, char *argv[]) {
     /* The address to ping... */
-    uint8 data[DATA_SIZE];
+    uint8_t data[DATA_SIZE];
     char str1[INET6_ADDRSTRLEN];
     int i, sock;
     struct sockaddr_in6 addr;
@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
     socklen_t alen;
 
     /* Set a callback to exit when start is pressed */
-    cont_btn_callback(0, CONT_START, (cont_btn_callback_t)arch_exit);
+    cont_btn_callback(0, CONT_START, (cont_btn_callback_t)exit);
 
     dbgio_dev_select("fb");
 

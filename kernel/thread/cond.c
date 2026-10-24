@@ -15,33 +15,15 @@
 
 #include <kos/thread.h>
 #include <kos/cond.h>
+#include <kos/errno.h>
 #include <kos/genwait.h>
 
 #include <kos/dbglog.h>
 
 /**************************************/
 
-/* Allocate a new condvar */
-condvar_t *cond_create(void) {
-    condvar_t *cv;
-
-    dbglog(DBG_WARNING, "Creating condvar with deprecated cond_create(). "
-           "Please update your code!\n");
-
-    /* Create a condvar structure */
-    if(!(cv = (condvar_t *)malloc(sizeof(condvar_t)))) {
-        errno = ENOMEM;
-        return NULL;
-    }
-
-    cv->dynamic = 1;
-
-    return cv;
-}
-
 int cond_init(condvar_t *cv) {
     cv->dummy = 0;
-    cv->dynamic = 0;
     return 0;
 }
 
@@ -49,10 +31,6 @@ int cond_init(condvar_t *cv) {
 int cond_destroy(condvar_t *cv) {
     /* Give all sleeping threads a timed out error */
     genwait_wake_all_err(cv, ENOTRECOVERABLE);
-
-    /* Free the memory */
-    if(cv->dynamic)
-        free(cv);
 
     return 0;
 }
@@ -68,7 +46,7 @@ int cond_wait_timed(condvar_t *cv, mutex_t *m, int timeout) {
 
     irq_disable_scoped();
 
-    if(m->type < MUTEX_TYPE_NORMAL || m->type > MUTEX_TYPE_RECURSIVE ||
+    if(m->type > MUTEX_TYPE_RECURSIVE ||
        !mutex_is_locked(m)) {
         errno = EINVAL;
         return -1;
@@ -78,11 +56,13 @@ int cond_wait_timed(condvar_t *cv, mutex_t *m, int timeout) {
     mutex_unlock(m);
 
     /* Now block us until we're signaled */
-    rv = genwait_wait(cv, timeout ? "cond_wait_timed" : "cond_wait", timeout,
-                      NULL);
+    rv = genwait_wait(cv, timeout ? "cond_wait_timed" : "cond_wait", timeout);
 
     if(rv < 0 && errno == EAGAIN)
         errno = ETIMEDOUT;
+
+    /* Caching errno since a contended mutex sets EBUSY. */
+    errno_save_scoped();
 
     /* Re-lock our mutex */
     mutex_lock(m);

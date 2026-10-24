@@ -25,10 +25,10 @@
 #ifndef __DC_SOUND_STREAM_H
 #define __DC_SOUND_STREAM_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
-#include <arch/types.h>
+#include <stdint.h>
 
 /** \defgroup audio_streaming   Streaming
     \brief                      Streaming audio playback and management
@@ -46,7 +46,7 @@ __BEGIN_DECLS
 #define SND_STREAM_BUFFER_MAX_PCM8  (64 << 10)
 
 /** \brief  The maximum buffer size for each channel of ADPCM stream. */
-#define SND_STREAM_BUFFER_MAX_ADPCM (32 << 10)
+#define SND_STREAM_BUFFER_MAX_ADPCM ((32 << 10) - 64)
 
 /** \brief  The maximum buffer size for each channel of streams by default
             and for backward compatibility. */
@@ -190,6 +190,7 @@ void snd_stream_filter_remove(snd_stream_hnd_t hnd,
                               snd_stream_filter_t filtfunc, void *obj);
 
 /** \brief  Prefill the stream buffers.
+    \deprecated This function has no effect and should be removed.
 
     This function has no effect. The stream is prefilled on start.
     This is deprecated and should be removed if used.
@@ -300,7 +301,7 @@ void snd_stream_queue_go(snd_stream_hnd_t hnd);
     \param  freq            The frequency of the sound.
     \param  st              1 if the sound is stereo, 0 if mono.
 */
-void snd_stream_start(snd_stream_hnd_t hnd, uint32 freq, int st);
+void snd_stream_start(snd_stream_hnd_t hnd, uint32_t freq, int st);
 
 /** \brief  Start a 8-bit PCM stream.
 
@@ -311,7 +312,7 @@ void snd_stream_start(snd_stream_hnd_t hnd, uint32 freq, int st);
     \param  freq            The frequency of the sound.
     \param  st              1 if the sound is stereo, 0 if mono.
 */
-void snd_stream_start_pcm8(snd_stream_hnd_t hnd, uint32 freq, int st);
+void snd_stream_start_pcm8(snd_stream_hnd_t hnd, uint32_t freq, int st);
 
 /** \brief  Start a 4-bit ADPCM stream.
 
@@ -322,7 +323,7 @@ void snd_stream_start_pcm8(snd_stream_hnd_t hnd, uint32 freq, int st);
     \param  freq            The frequency of the sound.
     \param  st              1 if the sound is stereo, 0 if mono.
 */
-void snd_stream_start_adpcm(snd_stream_hnd_t hnd, uint32 freq, int st);
+void snd_stream_start_adpcm(snd_stream_hnd_t hnd, uint32_t freq, int st);
 
 /** \brief  Stop a stream.
 

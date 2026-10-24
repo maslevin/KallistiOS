@@ -19,8 +19,10 @@
 #ifndef __DC_NET_BROADBAND_ADAPTER_H
 #define __DC_NET_BROADBAND_ADAPTER_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
+
+#include <stdint.h>
 
 /** \defgroup bba Broadband Adapter
     \brief    Driver for the Dreamcast's BBA (RTL8139C).
@@ -36,8 +38,8 @@ __BEGIN_DECLS
 /** \defgroup bba_regs_locs Locations
     \brief    Locations for various broadband adapter registers.
 
-    The default assumption is that these are all RW at any aligned size unless 
-    otherwise noted. ex (RW 32bit, RO 16/8) indicates read/write at 32bit and 
+    The default assumption is that these are all RW at any aligned size unless
+    otherwise noted. ex (RW 32bit, RO 16/8) indicates read/write at 32bit and
     read-only at 16 or 8bits.
 
     @{
@@ -279,7 +281,7 @@ __BEGIN_DECLS
 
     \param  arr             The array to read the MAC into.
 */
-void bba_get_mac(uint8 *arr);
+void bba_get_mac(uint8_t *arr);
 
 /** \defgroup bba_rx RX
     \brief    Receive packet API for the BBA
@@ -294,7 +296,7 @@ void bba_get_mac(uint8 *arr);
     \param  pkt             A pointer to the packet in question.
     \param  len             The length, in bytes, of the packet.
 */
-typedef void (*eth_rx_callback_t)(uint8 *pkt, int len);
+typedef void (*eth_rx_callback_t)(uint8_t *pkt, int len);
 
 /** \brief   Set the ethernet packet receive callback.
 
@@ -344,7 +346,7 @@ void bba_set_rx_callback(eth_rx_callback_t cb);
     \retval BBA_TX_AGAIN    If BBA_TX_NOWAIT was specified and it is not ok to
                             transmit right now.
 */
-int bba_tx(const uint8 *pkt, int len, int wait);
+int bba_tx(const uint8_t *pkt, int len, int wait);
 
 /** @} */
 

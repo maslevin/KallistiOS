@@ -13,45 +13,43 @@
 
 #include <kos/net.h>
 #include <kos/mutex.h>
-#include <arch/timer.h>
-#include <arch/irq.h>
+#include <kos/timer.h>
 
+#include "net_core.h"
 #include "net_ipv4.h"
-#include "net_thd.h"
 
 #define MAX(a, b) a > b ? a : b;
+
+#define IP_FRAG_POLL_PERIOD_MS 2000
 
 struct ip_frag {
     TAILQ_ENTRY(ip_frag) listhnd;
 
-    uint32 src;
-    uint32 dst;
-    uint16 ident;
-    uint8 proto;
+    uint32_t src;
+    uint32_t dst;
+    uint16_t ident;
+    uint8_t proto;
 
     ip_hdr_t hdr;
-    uint8 *data;
-    uint8 bitfield[8192];
+    uint8_t *data;
+    uint8_t bitfield[8192];
     int cur_length;
     int total_length;
-    uint64 death_time;
+    uint64_t death_time;
 };
 
 TAILQ_HEAD(ip_frag_list, ip_frag);
 
 static struct ip_frag_list frags;
 static mutex_t frag_mutex = MUTEX_INITIALIZER;
-static int cbid = -1;
 static int initted = 0;
 
 /* IP fragment "thread" -- this thread is set up to delete fragments for which
    the "death_time" has passed. This is run approximately once every two
    seconds (since death_time is always on the order of seconds). */
-static void frag_thd_cb(void *data) {
+static void net_ipv4_frag_job(workqueue_t *wq, workqueue_job_t *job) {
     struct ip_frag *f, *n;
-    uint64 now = timer_ms_gettime64();
-
-    (void)data;
+    uint64_t now = timer_ms_gettime64();
 
     mutex_lock_scoped(&frag_mutex);
 
@@ -70,10 +68,13 @@ static void frag_thd_cb(void *data) {
 
         f = n;
     }
+
+    job->time_ms = now + IP_FRAG_POLL_PERIOD_MS;
+    workqueue_enqueue(wq, job);
 }
 
 /* Set the bits in the bitfield for the given set of fragment blocks. */
-static inline void set_bits(uint8 *bitfield, int start, int end) {
+static inline void set_bits(uint8_t *bitfield, int start, int end) {
     /* Use a slightly more efficient method when dealing with an end that is not
        in the same byte as the start. */
     if((end >> 3) > (start >> 3)) {
@@ -105,7 +106,7 @@ static inline void set_bits(uint8 *bitfield, int start, int end) {
 }
 
 /* Check if all bits in the bitfield that should be set are set. */
-static inline int all_bits_set(const uint8 *bitfield, int end) {
+static inline int __pure all_bits_set(const uint8_t *bitfield, int end) {
     int i;
 
     /* Make sure each of the beginning bytes are fully set. */
@@ -125,8 +126,8 @@ static inline int all_bits_set(const uint8 *bitfield, int end) {
 
 /* Import the data for a fragment, potentially passing it onward in processing,
    if the whole datagram has arrived. */
-static int frag_import(netif_t *src, const ip_hdr_t *hdr, const uint8 *data,
-                       size_t size, uint16 flags, struct ip_frag *frag) {
+static int frag_import(netif_t *src, const ip_hdr_t *hdr, const uint8_t *data,
+                       size_t size, uint16_t flags, struct ip_frag *frag) {
     void *tmp;
     int fo = flags & 0x1FFF;
     int tl = ntohs(hdr->length);
@@ -134,7 +135,7 @@ static int frag_import(netif_t *src, const ip_hdr_t *hdr, const uint8 *data,
     int ihl = (hdr->version_ihl & 0x0F) << 2;
     int end = start + tl - ihl;
     int rv = 0;
-    uint64 now = timer_ms_gettime64();
+    uint64_t now = timer_ms_gettime64();
 
     (void)size;
 
@@ -193,11 +194,11 @@ out:
 
 /* IPv4 fragmentation procedure. This is basically a direct implementation of
    the example IP fragmentation procedure on pages 26-27 of RFC 791. */
-int net_ipv4_frag_send(netif_t *net, ip_hdr_t *hdr, const uint8 *data,
+int net_ipv4_frag_send(netif_t *net, ip_hdr_t *hdr, const uint8_t *data,
                        size_t size) {
     int ihl = (hdr->version_ihl & 0x0f) << 2;
     int total = size + ihl;
-    uint16 flags = ntohs(hdr->flags_frag_offs);
+    uint16_t flags = ntohs(hdr->flags_frag_offs);
     ip_hdr_t newhdr;
     int nfb, ds;
 
@@ -205,7 +206,7 @@ int net_ipv4_frag_send(netif_t *net, ip_hdr_t *hdr, const uint8 *data,
         net = net_default_dev;
 
     /* If the packet doesn't need to be fragmented, send it away as is. */
-    if(total < net->mtu) {
+    if(total <= net->mtu) {
         return net_ipv4_send_packet(net, hdr, data, size);
     }
     /* If it needs to be fragmented and the DF flag is set, return error. */
@@ -223,7 +224,7 @@ int net_ipv4_frag_send(netif_t *net, ip_hdr_t *hdr, const uint8 *data,
 
     /* Recompute the checksum. */
     newhdr.checksum = 0;
-    newhdr.checksum = net_ipv4_checksum((uint8 *)&newhdr, sizeof(ip_hdr_t), 0);
+    newhdr.checksum = net_ipv4_checksum((uint8_t *)&newhdr, sizeof(ip_hdr_t), 0);
 
     if(net_ipv4_send_packet(net, &newhdr, data, ds)) {
         return -1;
@@ -235,7 +236,7 @@ int net_ipv4_frag_send(netif_t *net, ip_hdr_t *hdr, const uint8 *data,
     hdr->length = htons(ihl + size - ds);
     hdr->flags_frag_offs = htons((flags & 0xE000) | ((flags & 0x1FFF) + nfb));
     hdr->checksum = 0;
-    hdr->checksum = net_ipv4_checksum((uint8 *)hdr, sizeof(ip_hdr_t), 0);
+    hdr->checksum = net_ipv4_checksum((uint8_t *)hdr, sizeof(ip_hdr_t), 0);
 
     return net_ipv4_frag_send(net, hdr, data + ds, size - ds);
 }
@@ -243,9 +244,9 @@ int net_ipv4_frag_send(netif_t *net, ip_hdr_t *hdr, const uint8 *data,
 /* IPv4 fragment reassembly procedure. This (along with the frag_import function
    above are basically a direct implementation of the example IP reassembly
    routine on pages 27-29 of RFC 791. */
-int net_ipv4_reassemble(netif_t *src, const ip_hdr_t *hdr, const uint8 *data,
+int net_ipv4_reassemble(netif_t *src, const ip_hdr_t *hdr, const uint8_t *data,
                         size_t size) {
-    uint16 flags = ntohs(hdr->flags_frag_offs);
+    uint16_t flags = ntohs(hdr->flags_frag_offs);
     struct ip_frag *f;
 
     /* If the fragment offset is zero and the MF flag is 0, this is the whole
@@ -291,10 +292,15 @@ int net_ipv4_reassemble(netif_t *src, const ip_hdr_t *hdr, const uint8 *data,
     return frag_import(src, hdr, data, size, flags, f);
 }
 
+static workqueue_job_t net_ipv4_frag_wq_job = {
+    .cb = net_ipv4_frag_job,
+};
+
 int net_ipv4_frag_init(void) {
     if(!initted) {
-        cbid = net_thd_add_callback(&frag_thd_cb, NULL, 2000);
         TAILQ_INIT(&frags);
+        net_ipv4_frag_wq_job.time_ms = timer_ms_gettime64() + IP_FRAG_POLL_PERIOD_MS;
+        workqueue_enqueue(net_wq, &net_ipv4_frag_wq_job);
     }
 
     initted = 1;
@@ -305,8 +311,7 @@ void net_ipv4_frag_shutdown(void) {
     struct ip_frag *c, *n;
 
     if(initted) {
-        if(cbid != -1)
-            net_thd_del_callback(cbid);
+        workqueue_cancel(net_wq, &net_ipv4_frag_wq_job);
 
         c = TAILQ_FIRST(&frags);
 
@@ -318,7 +323,6 @@ void net_ipv4_frag_shutdown(void) {
         }
     }
 
-    cbid = -1;
     initted = 0;
     TAILQ_INIT(&frags);
 }

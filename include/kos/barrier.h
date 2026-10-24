@@ -7,7 +7,7 @@
 #ifndef __KOS_BARRIER_H
 #define __KOS_BARRIER_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 /** \file       kos/barrier.h
@@ -33,7 +33,7 @@ __BEGIN_DECLS
 
     Barriers are a type of synchronization method which halt execution
     for group of threads until a certain number of them have reached
-    the barrier. 
+    the barrier.
 
     @{
 */

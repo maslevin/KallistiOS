@@ -14,7 +14,7 @@
 #ifndef __PVR_MEM_CORE_H
 #define __PVR_MEM_CORE_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 /*
@@ -1178,7 +1178,7 @@ size_t   public_pvr_mUSABLe();
 
 */
 #if __STD_C
-void     public_pvr_mSTATs();
+void     public_pvr_mSTATs(void);
 #else
 void     public_pvr_mSTATs();
 #endif
@@ -1392,6 +1392,6 @@ void     public_pvr_mSTATs();
 
 __END_DECLS
 
-#endif  /* __MALLOC_H */
+#endif  /* __PVR_MEM_CORE_H */
 
 

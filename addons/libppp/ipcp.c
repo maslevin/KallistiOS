@@ -177,7 +177,6 @@ static int ipcp_handle_configure_req(ppp_protocol_t *self,
 
         case PPP_STATE_OPENED:
             /* XXXX: This layer down. */
-            __fallthrough;
 
         case PPP_STATE_STOPPED:
             ipcp_send_client_cfg(self, 0);
@@ -303,10 +302,10 @@ reject_opt:
         /* Save all the accepted configuration options in the network
            device structure. */
         if(nif) {
-            nif->gateway[0] = (uint8)(addr >> 24);
-            nif->gateway[1] = (uint8)(addr >> 16);
-            nif->gateway[2] = (uint8)(addr >> 8);
-            nif->gateway[3] = (uint8)addr;
+            nif->gateway[0] = (uint8_t)(addr >> 24);
+            nif->gateway[1] = (uint8_t)(addr >> 16);
+            nif->gateway[2] = (uint8_t)(addr >> 8);
+            nif->gateway[3] = (uint8_t)addr;
         }
 
         if(ipcp_state.state == PPP_STATE_ACK_RECEIVED) {
@@ -390,7 +389,6 @@ static int ipcp_handle_configure_ack(ppp_protocol_t *self,
         case PPP_STATE_OPENED:
             /* Uh oh... Something's gone wrong. */
             /* XXXX: This layer down. */
-            __fallthrough;
 
         case PPP_STATE_ACK_RECEIVED:
             /* Well, this isn't good... Resend the configure request and back
@@ -440,7 +438,6 @@ static int ipcp_handle_configure_nak(ppp_protocol_t *self,
 
         case PPP_STATE_OPENED:
             /* XXXX: This layer down. */
-            __fallthrough;
 
         case PPP_STATE_REQUEST_SENT:
         case PPP_STATE_ACK_RECEIVED:
@@ -518,15 +515,15 @@ static int ipcp_handle_configure_nak(ppp_protocol_t *self,
     if(ipcp_state.ppp_state->netif) {
         netif_t *nif = ipcp_state.ppp_state->netif;
 
-        nif->ip_addr[0] = (uint8)(addr >> 24);
-        nif->ip_addr[1] = (uint8)(addr >> 16);
-        nif->ip_addr[2] = (uint8)(addr >> 8);
-        nif->ip_addr[3] = (uint8)addr;
+        nif->ip_addr[0] = (uint8_t)(addr >> 24);
+        nif->ip_addr[1] = (uint8_t)(addr >> 16);
+        nif->ip_addr[2] = (uint8_t)(addr >> 8);
+        nif->ip_addr[3] = (uint8_t)addr;
 
-        nif->dns[0] = (uint8)(dns >> 24);
-        nif->dns[1] = (uint8)(dns >> 16);
-        nif->dns[2] = (uint8)(dns >> 8);
-        nif->dns[3] = (uint8)dns;
+        nif->dns[0] = (uint8_t)(dns >> 24);
+        nif->dns[1] = (uint8_t)(dns >> 16);
+        nif->dns[2] = (uint8_t)(dns >> 8);
+        nif->dns[3] = (uint8_t)dns;
     }
 
     return ipcp_send_client_cfg(self, 0);

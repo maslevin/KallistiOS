@@ -2,15 +2,18 @@
 
    spu.c
    Copyright (C) 2000, 2001 Megan Potter
-   Copyright (C) 2023, 2024 Ruslan Rostovtsev
+   Copyright (C) 2023, 2024, 2026 Ruslan Rostovtsev
  */
 
 #include <kos/thread.h>
+#include <kos/regfield.h>
+#include <arch/arch.h>
 #include <dc/spu.h>
 #include <dc/g2bus.h>
 #include <dc/sq.h>
-#include <arch/timer.h>
+#include <kos/timer.h>
 #include <errno.h>
+#include <sys/cdefs.h>
 
 /*
 
@@ -34,10 +37,14 @@ kernel; so don't use them if you don't need to =).
 #define SNDREGADDR(x) (0xa0700000 + (x))
 #define CHNREGADDR(chn, x) SNDREGADDR(0x80*(chn) + (x))
 
+static inline uint32_t spu_ram_mode(void) {
+    return hardware_sys_mode(NULL) == HW_TYPE_RETAIL ? 0 : BIT(9);
+}
+
 /* memcpy and memset designed for sound RAM; for addresses, don't
    bother to include the 0xa0800000 offset that is implied. 'length'
    must be a multiple of 4, but if it is not it will be rounded up. */
-void spu_memload(uintptr_t dst, void *src_void, size_t length) {
+void spu_memload(uintptr_t dst, const void *src_void, size_t length) {
     uint8_t *src = (uint8_t *)src_void;
 
     /* Make sure it's an even number of 32-bit words and convert the
@@ -62,7 +69,7 @@ void spu_memload(uintptr_t dst, void *src_void, size_t length) {
     }
 }
 
-void spu_memload_sq(uintptr_t dst, void *src_void, size_t length) {
+void spu_memload_sq(uintptr_t dst, const void *src_void, size_t length) {
     uint8_t *src = (uint8_t *)src_void;
     size_t aligned_len;
     g2_ctx_t ctx;
@@ -73,9 +80,7 @@ void spu_memload_sq(uintptr_t dst, void *src_void, size_t length) {
     }
 
     /* Round up to the nearest multiple of 4 */
-    if(length & 3) {
-        length = (length + 4) & ~3;
-    }
+    length = __align_up(length, 4);
 
     /* Using SQs for all that is divisible by 32 */
     aligned_len = length & ~31;
@@ -113,7 +118,7 @@ void spu_memload_sq(uintptr_t dst, void *src_void, size_t length) {
     }
 }
 
-void spu_memload_dma(uintptr_t dst, void *src_void, size_t length) {
+void spu_memload_dma(uintptr_t dst, const void *src_void, size_t length) {
     uint8_t *src = (uint8_t *)src_void;
     size_t aligned_len;
 
@@ -127,16 +132,14 @@ void spu_memload_dma(uintptr_t dst, void *src_void, size_t length) {
     }
 
     /* Round up to the nearest multiple of 4 */
-    if(length & 3) {
-        length = (length + 4) & ~3;
-    }
+    length = __align_up(length, 4);
 
     /* Using DMA (or SQ's on fail) for all that is divisible by 32 */
     aligned_len = length & ~31;
     length &= 31;
 
     do {
-        if(spu_dma_transfer(src_void, dst, aligned_len, 1, NULL, NULL) < 0) {
+        if(spu_dma_transfer((void *)src_void, dst, aligned_len, 1, NULL, NULL) < 0) {
             if(errno == EINPROGRESS) {
                 thd_pass();
                 continue;
@@ -144,7 +147,7 @@ void spu_memload_dma(uintptr_t dst, void *src_void, size_t length) {
             spu_memload_sq(dst, src_void, aligned_len);
         }
         break;
-    } while (1);
+    } while(1);
 
     if(length > 0) {
         /* Make sure the destination is in a non-cached area */
@@ -215,9 +218,7 @@ void spu_memset_sq(uintptr_t dst, uint32_t what, size_t length) {
     g2_ctx_t ctx;
 
     /* Round up to the nearest multiple of 4 */
-    if(length & 3) {
-        length = (length + 4) & ~3;
-    }
+    length = __align_up(length, 4);
 
     /* Using SQs for all that is divisible by 32 */
     aligned_len = length & ~31;
@@ -255,23 +256,33 @@ void spu_memset_sq(uintptr_t dst, uint32_t what, size_t length) {
 /* Reset the AICA channel registers */
 void spu_reset_chans(void) {
     int i;
-    g2_ctx_t ctx;
+    uint32_t sav;
 
-    ctx = g2_lock();
+    g2_lock_scoped();
     g2_fifo_wait();
 
-    g2_write_32_raw(SNDREGADDR(0x2800), 0);
+    /* Read current mode and stereo settings */
+    sav = g2_read_32_raw(SNDREGADDR(0x2800)) | spu_ram_mode();
+
+    g2_fifo_wait();
+    g2_write_32_raw(SNDREGADDR(0x2800), sav & ~0x000f);
+    g2_fifo_wait();
 
     for(i = 0; i < 64; i++) {
-        if((i & 3) == 0) g2_fifo_wait();
-
         g2_write_32_raw(CHNREGADDR(i, 0), 0x8000);
-        g2_write_32_raw(CHNREGADDR(i, 20), 0x1f);
+        g2_write_32_raw(CHNREGADDR(i, 0x10), 0x1f);
+        g2_write_32_raw(CHNREGADDR(i, 0x14), 0x1f);
+
+        g2_write_32_raw(CHNREGADDR(i, 0x2C), 0x1ff8);
+        g2_write_32_raw(CHNREGADDR(i, 0x30), 0x1ff8);
+        g2_write_32_raw(CHNREGADDR(i, 0x34), 0x1ff8);
+        g2_write_32_raw(CHNREGADDR(i, 0x38), 0x1ff8);
+        g2_write_32_raw(CHNREGADDR(i, 0x3C), 0x1ff8);
+
+        g2_fifo_wait();
     }
 
-    g2_fifo_wait();
-    g2_write_32_raw(SNDREGADDR(0x2800), 0x000f);
-    g2_unlock(ctx);
+    g2_write_32_raw(SNDREGADDR(0x2800), (sav & ~0x000f) | 0x000f);
 }
 
 /* Enable/disable the SPU; note that disable implies reset of the
@@ -333,18 +344,26 @@ static void spu_cdda_init(void) {
 
 /* Set master volume (0..15) and mono/stereo settings */
 void spu_master_mixer(int volume, int stereo) {
+    uint32_t val;
+
     g2_fifo_wait();
-    g2_write_32(SNDREGADDR(0x2800), volume | (stereo ? 0 : 0x8000));
+    val = g2_read_32(SNDREGADDR(0x2800));
+    g2_write_32(SNDREGADDR(0x2800),
+                (val & ~0x800f) | (volume & 0xf) | (stereo ? 0 : 0x8000) |
+                spu_ram_mode());
 }
 
 /* Initialize the SPU; by default it will be left in a state of
    reset until you upload a program. */
 int spu_init(void) {
+    /* Set the RAM mode (2MB or 8MB) and default to stereo/min volume */
+    g2_write_32(SNDREGADDR(0x2800), spu_ram_mode());
+
     /* Stop the ARM */
     spu_disable();
 
     /* Clear out sound RAM */
-    spu_memset_sq(0, 0, 0x200000);
+    spu_memset_sq(0, 0, SPU_RAM_SIZE);
 
     /* Load a default "program" into the SPU that just executes
        an infinite loop, so that CD audio works. */
@@ -355,7 +374,7 @@ int spu_init(void) {
     spu_enable();
 
     /* Wait a few clocks */
-    timer_spin_sleep(10);
+    thd_sleep(10);
 
     /* Initialize CDDA channels */
     spu_cdda_init();
@@ -366,7 +385,7 @@ int spu_init(void) {
 /* Shutdown SPU */
 int spu_shutdown(void) {
     spu_disable();
-    spu_memset_sq(0, 0, 0x200000);
+    spu_memset_sq(0, 0, SPU_RAM_SIZE);
     return 0;
 }
 

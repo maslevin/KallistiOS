@@ -2,7 +2,7 @@
 
    dc/spu.h
    Copyright (C) 2000, 2001 Megan Potter
-   Copyright (C) 2023, 2024 Ruslan Rostovtsev
+   Copyright (C) 2023, 2024, 2026 Ruslan Rostovtsev
 
 */
 
@@ -19,10 +19,11 @@
 #ifndef __DC_SPU_H
 #define __DC_SPU_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
-#include <arch/memory.h>
+#include <arch/arch.h>
+#include <dc/memory.h>
 #include <dc/g2bus.h>
 
 /** \addtogroup audio_driver
@@ -32,6 +33,14 @@ __BEGIN_DECLS
 /** \brief  Sound ram address from the SH4 side */
 #define SPU_RAM_BASE 0x00800000
 #define SPU_RAM_UNCACHED_BASE (MEM_AREA_P2_BASE | SPU_RAM_BASE)
+
+/** \brief  Sound RAM size on Dreamcast */
+#define SPU_RAM_SIZE_2MB    0x200000
+/** \brief  Sound RAM size on NAOMI */
+#define SPU_RAM_SIZE_8MB    0x800000
+/** \brief  Sound RAM size for the current hardware */
+#define SPU_RAM_SIZE        (hardware_sys_mode(NULL) == HW_TYPE_RETAIL ? \
+                             SPU_RAM_SIZE_2MB : SPU_RAM_SIZE_8MB)
 
 /** \brief  Copy a block of data to sound RAM.
 
@@ -43,7 +52,7 @@ __BEGIN_DECLS
     \param  length          The number of bytes to copy. Automatically rounded
                             up to be a multiple of 4.
 */
-void spu_memload(uintptr_t to, void *from, size_t length);
+void spu_memload(uintptr_t to, const void *from, size_t length);
 
 
 /** \brief  Copy a block of data to sound RAM by using the Store Queues.
@@ -57,7 +66,7 @@ void spu_memload(uintptr_t to, void *from, size_t length);
     \param  length          The number of bytes to copy. Automatically rounded
                             up to be a multiple of 4.
 */
-void spu_memload_sq(uintptr_t to, void *from, size_t length);
+void spu_memload_sq(uintptr_t to, const void *from, size_t length);
 
 /** \brief  Copy a block of data to sound RAM by using DMA (or SQ on fails).
 
@@ -69,7 +78,7 @@ void spu_memload_sq(uintptr_t to, void *from, size_t length);
     \param  from            A pointer to copy from.
     \param  length          The number of bytes to copy. Must be a multiple of 32.
 */
-void spu_memload_dma(uintptr_t to, void *from, size_t length);
+void spu_memload_dma(uintptr_t to, const void *from, size_t length);
 
 /** \brief  Copy a block of data from sound RAM.
 

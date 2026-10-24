@@ -10,8 +10,7 @@
     \brief   Dreamcast architecture specific options.
     \ingroup arch
 
-    This file has various architecture specific options defined in it. Also, any
-    functions that start with arch_ are in here.
+    This file has various architecture specific options defined in it.
 
     \author Megan Potter
 */
@@ -23,8 +22,9 @@
 __BEGIN_DECLS
 
 #include <stdbool.h>
+#include <stdint.h>
 
-#include <arch/types.h>
+#include <kos/elf.h>
 
 /** \defgroup arch  Architecture
     \brief          Dreamcast Architecture-Specific Options and high-level API
@@ -33,18 +33,18 @@ __BEGIN_DECLS
 */
 
 /** \brief  Top of memory available, depending on memory size. */
-#ifdef __KOS_GCC_32MB__
-extern uint32 _arch_mem_top;
+#if defined(__KOS_GCC_32MB__) || __KOS_GCC_PATCHLEVEL__ >= 2025062800
+extern uint32_t _arch_mem_top;
 #else
 #pragma message "Outdated toolchain: not patched for 32MB support, limiting "\
     "KOS to 16MB-only behavior to retain maximum compatibility. Please "\
     "update your toolchain."
-#define _arch_mem_top   ((uint32) 0x8d000000)
+#define _arch_mem_top   ((uint32_t) 0x8d000000)
 #endif
 
 /** \brief  Start and End address for .text portion of program. */
 extern char _executable_start;
-extern char _etext; 
+extern char _etext;
 
 #define PAGESIZE        4096            /**< \brief Page size (for MMU) */
 #define PAGESIZE_BITS   12              /**< \brief Bits for page size */
@@ -79,38 +79,23 @@ extern char _etext;
 static const
 unsigned HZ __depr("Please use the new THD_SCHED_HZ macro.") = THD_SCHED_HZ;
 
-#ifndef THD_STACK_ALIGNMENT
-/** \brief  Required alignment for stack. */
-#define THD_STACK_ALIGNMENT 8
-#endif
-
-#ifndef THD_STACK_SIZE
-/** \brief  Default thread stack size. */
-#define THD_STACK_SIZE  32768
-#endif
-
-#ifndef THD_KERNEL_STACK_SIZE
-/** \brief Main/kernel thread's stack size. */
-#define THD_KERNEL_STACK_SIZE (64 * 1024)
-#endif
-
-/** \brief  Default video mode. */
-#define DEFAULT_VID_MODE    DM_640x480
-
-/** \brief  Default pixel mode for video. */
-#define DEFAULT_PIXEL_MODE  PM_RGB565
-
-/** \brief  Default serial bitrate. */
-#define DEFAULT_SERIAL_BAUD 115200
-
-/** \brief  Default serial FIFO behavior. */
-#define DEFAULT_SERIAL_FIFO 1
-
 /** \brief  Global symbol prefix in ELF files. */
 #define ELF_SYM_PREFIX      "_"
 
 /** \brief  Length of global symbol prefix in ELF files. */
 #define ELF_SYM_PREFIX_LEN  1
+
+/** \brief  Standard name for this arch. */
+#define ARCH_NAME           "Dreamcast"
+
+/** \brief  ELF class for this architecture. */
+#define ARCH_ELFCLASS       ELFCLASS32
+
+/** \brief  ELF data encoding for this architecture. */
+#define ARCH_ELFDATA        ELFDATA2LSB
+
+/** \brief  ELF machine type code for this architecture. */
+#define ARCH_CODE           EM_SH
 
 /** \brief  Panic function.
 
@@ -206,38 +191,11 @@ void arch_menu(void) __noreturn;
 */
 #define DBL_MEM (_arch_mem_top - 0x8d000000)
 
-/* These are in mm.c */
-/** \brief   Initialize the memory management system.
-    \ingroup arch
-
-    \retval 0               On success (no error conditions defined).
-*/
-int mm_init(void);
-
-/** \brief   Request more core memory from the system.
-    \ingroup arch
-
-    \param  increment       The number of bytes requested.
-    \return                 A pointer to the memory.
-    \note                   This function will panic if no memory is available.
-*/
-void * mm_sbrk(unsigned long increment);
-
 /* Bring in the init flags for compatibility with old code that expects them
    here. */
 #include <kos/init.h>
 
 /* Dreamcast-specific arch init things */
-/** \brief   Jump back to the bootloader.
-    \ingroup arch
-
-    You generally shouldn't use this function, but rather use arch_exit() or
-    exit() instead.
-
-    \note                   This function will never return!
-*/
-void arch_real_exit(int ret_code) __noreturn;
-
 /** \brief   Initialize bare-bones hardware systems.
     \ingroup arch
 
@@ -278,6 +236,7 @@ void hardware_shutdown(void);
 */
 #define HW_TYPE_RETAIL      0x0     /**< \brief A retail Dreamcast. */
 #define HW_TYPE_SET5        0x9     /**< \brief A Set5.xx devkit. */
+#define HW_TYPE_NAOMI       0xa     /**< \brief A NAOMI arcade. */
 /** @} */
 
 /** \defgroup hw_regions            Region Codes
@@ -285,10 +244,10 @@ void hardware_shutdown(void);
     \ingroup  arch
 
     These are the various region codes that can be returned by the
-    hardware_sys_mode() function. 
+    hardware_sys_mode() function.
 
     \note
-    A retail Dreamcast will always return 0 for the region code. 
+    A retail Dreamcast will always return 0 for the region code.
     You must read the region of a retail device from the flashrom.
 
     \see    fr_region
@@ -315,108 +274,16 @@ void hardware_shutdown(void);
                             -- otherwise, you must retrieve the region from the
                             flashrom.
     \return                 The console type (one of the \ref hw_consoles).
+
+    \note    Do not use before hardware_sys_init() has been called.
 */
 int hardware_sys_mode(int *region);
-
-/* These three aught to be in their own header file at some point, but for now,
-   they'll stay here. */
-
-/** \brief   Retrieve the banner printed at program initialization.
-    \ingroup attribution
-
-    This function retrieves the banner string that is printed at initialization
-    time by the kernel. This contains the version of KOS in use and basic
-    information about the environment in which it was compiled.
-
-    \return                 A pointer to the banner string.
-*/
-const char *kos_get_banner(void);
-
-/** \brief   Retrieve the license information for the compiled copy of KOS.
-    \ingroup attribution
-
-    This function retrieves a string containing the license terms that the
-    version of KOS in use is distributed under. This can be used to easily add
-    information to your program to be displayed at runtime.
-
-    \return                 A pointer to the license terms.
-*/
-const char *kos_get_license(void);
-
-/** \brief   Retrieve a list of authors and the dates of their contributions.
-    \ingroup attribution
-
-    This function retrieves the copyright information for the version of KOS in
-    use. This function can be used to add such information to the credits of
-    programs using KOS to give the appropriate credit to those that have worked
-    on KOS.
-
-    \remark
-    Remember, you do need to give credit where credit is due, and this is an
-    easy way to do so. ;-)
-
-    \return                 A pointer to the authors' copyright information.
-*/
-const char *kos_get_authors(void);
 
 /** \brief   Dreamcast specific sleep mode function.
     \ingroup arch
 */
 static inline void arch_sleep(void) {
     __asm__ __volatile__("sleep\n");
-}
-
-/** \brief   DC specific "function" to get the return address from the current
-             function.
-    \ingroup arch
-
-    \return                 The return address of the current function.
-*/
-static __always_inline uintptr_t arch_get_ret_addr(void) {
-    uintptr_t pr;
-
-    __asm__ __volatile__("sts pr,%0\n" : "=r"(pr));
-
-    return pr;
-}
-
-/* Please note that all of the following frame pointer macros are ONLY
-   valid if you have compiled your code WITHOUT -fomit-frame-pointer. These
-   are mainly useful for getting a stack trace from an error. */
-
-/** \brief   DC specific "function" to get the frame pointer from the current
-             function.
-    \ingroup arch
-
-    \return                 The frame pointer from the current function.
-    \note                   This only works if you don't disable frame pointers.
-*/
-static __always_inline uintptr_t arch_get_fptr(void) {
-    register uintptr_t fp __asm__("r14");
-
-    return fp;
-}
-
-/** \brief   Pass in a frame pointer value to get the return address for the
-             given frame.
-    \ingroup arch
-
-    \param  fptr            The frame pointer to look at.
-    \return                 The return address of the pointer.
-*/
-static inline uintptr_t arch_fptr_ret_addr(uintptr_t fptr) {
-    return *(uintptr_t *)fptr;
-}
-
-/** \brief   Pass in a frame pointer value to get the previous frame pointer for
-             the given frame.
-    \ingroup arch
-
-    \param  fptr            The frame pointer to look at.
-    \return                 The previous frame pointer.
-*/
-static inline uintptr_t arch_fptr_next(uintptr_t fptr) {
-    return arch_fptr_ret_addr(fptr + 4);
 }
 
 /** \brief   Returns true if the passed address is likely to be valid. Doesn't
@@ -440,6 +307,15 @@ static inline bool arch_valid_address(uintptr_t ptr) {
 static inline bool arch_valid_text_address(uintptr_t ptr) {
     return ptr >= (uintptr_t)&_executable_start && ptr < (uintptr_t)&_etext;
 }
+
+/* The following functions are moved out of this header and are only provided for
+   compatibility reasons. Including any of them via this header is deprecated.
+*/
+
+/* Moved to <kos/banner.h> */
+const char * __pure2 kos_get_banner(void);
+const char * __pure2 kos_get_license(void);
+const char *__pure2 kos_get_authors(void);
 
 __END_DECLS
 

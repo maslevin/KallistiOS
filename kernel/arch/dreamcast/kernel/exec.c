@@ -7,10 +7,10 @@
 #include <assert.h>
 
 #include <arch/arch.h>
-#include <arch/cache.h>
 #include <arch/exec.h>
-#include <arch/irq.h>
-#include <arch/memory.h>
+#include <dc/memory.h>
+#include <kos/cache.h>
+#include <kos/irq.h>
 
 /* Pull the shutdown function in from init.c */
 void arch_shutdown();
@@ -42,7 +42,7 @@ void arch_exec_at(const void *image, uint32_t length, uint32_t address) {
     irq_disable();
 
     /* Flush the data cache for the source area */
-    dcache_flush_range((uintptr_t)image, length);
+    dcache_wback_range((uintptr_t)image, length);
 
     /* Copy over the trampoline */
     for(i = 0; i < tcount; i++)
@@ -55,22 +55,22 @@ void arch_exec_at(const void *image, uint32_t length, uint32_t address) {
     values[3] = _arch_old_stack;    /* Patch in old R15 */
 
     /* Flush both caches for the trampoline area */
-    dcache_flush_range((uintptr_t)buffer, tcount * 4);
-    icache_flush_range((uintptr_t)buffer, tcount * 4);
+    dcache_wback_range((uintptr_t)buffer, tcount * 4);
+    icache_sync_range((uintptr_t)buffer, tcount * 4);
 
     /* Shut us down */
     arch_shutdown();
 
     /* Reset our old SR, VBR, and FPSCR */
-    __asm__ __volatile__("ldc	%0,sr\n"
+    __asm__ __volatile__("ldc   %0,sr\n"
                          : /* no outputs */
                          : "z"(_arch_old_sr)
                          : "memory");
-    __asm__ __volatile__("ldc	%0,vbr\n"
+    __asm__ __volatile__("ldc   %0,vbr\n"
                          : /* no outputs */
                          : "z"(_arch_old_vbr)
                          : "memory");
-    __asm__ __volatile__("lds	%0,fpscr\n"
+    __asm__ __volatile__("lds   %0,fpscr\n"
                          : /* no outputs */
                          : "z"(_arch_old_fpscr)
                          : "memory");

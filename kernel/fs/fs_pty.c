@@ -29,8 +29,6 @@ or space present.
 #include <kos/cond.h>
 #include <kos/fs_pty.h>
 
-#include <arch/types.h>
-
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -53,16 +51,16 @@ typedef LIST_HEAD(ptylist, ptyhalf) ptylist_t;
 typedef struct ptyhalf {
     LIST_ENTRY(ptyhalf) list;
 
-    struct ptyhalf * other;         /* Other end of the pipe */
+    struct ptyhalf *other;  /* Other end of the pipe */
     int master;             /* Non-zero if we are master */
 
-    uint8   buffer[PTY_BUFFER_SIZE];    /* Our _receive_ buffer */
+    uint8_t   buffer[PTY_BUFFER_SIZE];    /* Our _receive_ buffer */
     int head, tail;         /* Insert at head, remove at tail */
     size_t cnt;             /* Byte count in the queue */
 
     int refcnt;             /* When this reaches zero, we close */
 
-    int id;
+    unsigned int id;
 
     mutex_t     mutex;
     condvar_t   ready_read, ready_write;
@@ -123,8 +121,8 @@ int fs_pty_create(char *buffer, int maxbuflen, file_t *master_out, file_t *slave
         return -1;
 
     /* Initialize outputs to invalid values */
-    *master_out = -1;
-    *slave_out = -1;
+    *master_out = FILEHND_INVALID;
+    *slave_out = FILEHND_INVALID;
 
     /* Are we bootstrapping? */
     boot = LIST_EMPTY(&ptys);
@@ -177,12 +175,13 @@ int fs_pty_create(char *buffer, int maxbuflen, file_t *master_out, file_t *slave
     sprintf(mname, "/pty/ma%02x", master->id);
     sprintf(sname, "/pty/sl%02x", slave->id);
     *slave_out = fs_open(sname, O_RDWR);
-    if(*slave_out < 0)
+    if(*slave_out == FILEHND_INVALID)
         goto cleanup;
 
     if(boot) {
         /* Get the slave channel setup first, and dup it across
-           our stdout and stderr. */
+           our stdin, stdout and stderr. */
+        fs_dup2(*slave_out, STDIN_FILENO);
         fs_dup2(*slave_out, STDOUT_FILENO);
         fs_dup2(*slave_out, STDERR_FILENO);
     }
@@ -194,7 +193,7 @@ int fs_pty_create(char *buffer, int maxbuflen, file_t *master_out, file_t *slave
     return 0;
 
 cleanup:
-    
+
     if(*slave_out > 0)
         fs_close(*slave_out);
     else
@@ -211,7 +210,8 @@ static void pty_destroy_unused(void) {
 
     /* Make sure no one else is messing with the list and then disable
        everything for a bit */
-    mutex_lock_irqsafe(&list_mutex);
+    if(mutex_lock_irqsafe(&list_mutex))
+        return;
 
     old = irq_disable();
 
@@ -325,15 +325,15 @@ static void * pty_open_dir(const char * fn, int mode) {
     return (void *)fdobj;
 }
 
-static void * pty_open_file(const char * fn, int mode) {
+static void *pty_open_file(const char *fn, int mode) {
     /* Ok, they want an actual pty. We always give them one RDWR, no
        matter what is asked for (it's much simpler). Also we don't have to
        handle fds of our own here thanks to the VFS layer, just reference
        counting so a pty can be opened by more than one process. */
     int     master;
-    int     id;
-    ptyhalf_t   * ph;
-    pipefd_t    * fdobj;
+    unsigned int id;
+    ptyhalf_t   *ph;
+    pipefd_t    *fdobj;
 
     /* Parse out the name we got */
     if(strlen(fn) != 4) {
@@ -394,7 +394,7 @@ static void * pty_open_file(const char * fn, int mode) {
     return (void *)fdobj;
 }
 
-static void * pty_open(vfs_handler_t * vfs, const char * fn, int mode) {
+static void *pty_open(vfs_handler_t *vfs, const char *fn, int mode) {
     (void)vfs;
 
     /* Skip any preceding slash */
@@ -428,7 +428,8 @@ static int pty_close(void *h) {
 
     if(fdobj->type == PF_PTY) {
         /* De-ref this end of it */
-        mutex_lock_irqsafe(&fdobj->d.p->mutex);
+        if(mutex_lock_irqsafe(&fdobj->d.p->mutex))
+            return -1;
 
         fdobj->d.p->refcnt--;
 
@@ -451,55 +452,8 @@ static int pty_close(void *h) {
     return 0;
 }
 
-/* Read from a pty endpoint, kernel console special case */
-static ssize_t pty_read_serial(pipefd_t * fdobj, ptyhalf_t * ph, void * buf, size_t bytes) {
-    int c, r = 0;
-
-    (void)ph;
-
-    while(bytes > 0) {
-    again:
-        /* Try to read a char */
-        c = dbgio_read();
-
-        /* Get anything? */
-        if(c == -1) {
-            /* If we are in non-block, we give up now */
-            if(fdobj->mode & O_NONBLOCK) {
-                if(r == 0) {
-                    errno = EAGAIN;
-                    r = -1;
-                }
-
-                break;
-            }
-
-            /* Have we read anything at all? */
-            if(r == 0) {
-                /* Nope -- sleep a bit and try again */
-                thd_sleep(10);
-                goto again;
-            }
-            else
-                /* Yep -- that's enough */
-                break;
-        }
-
-        /* Add the obtained char to the buffer and echo it */
-        ((uint8 *)buf)[r] = c;
-        dbgio_write(c);
-        r++;
-    }
-
-    /* Flush any remaining echoed chars */
-    dbgio_flush();
-
-    /* Return the number we got */
-    return r;
-}
-
 /* Read from a pty endpoint */
-static ssize_t pty_read(void * h, void * buf, size_t bytes) {
+static ssize_t pty_read(void *h, void *buf, size_t bytes) {
     size_t avail;
     pipefd_t *fdobj;
     ptyhalf_t *ph;
@@ -513,8 +467,9 @@ static ssize_t pty_read(void * h, void * buf, size_t bytes) {
     }
 
     /* Special case the unattached console */
-    if(ph->id == 0 && !ph->master && ph->other->refcnt == 0)
-        return pty_read_serial(fdobj, ph, buf, bytes);
+    if(ph->id == 0 && !ph->master && ph->other->refcnt == 0) {
+        return dbgio_read_buffer((uint8_t *)buf, bytes);
+    }
 
     /* Lock the ptyhalf */
     mutex_lock(&ph->mutex);
@@ -547,7 +502,7 @@ static ssize_t pty_read(void * h, void * buf, size_t bytes) {
     if((ph->head + bytes) > PTY_BUFFER_SIZE) {
         avail = PTY_BUFFER_SIZE - ph->head;
         memcpy(buf, ph->buffer + ph->head, avail);
-        memcpy(((uint8 *)buf) + avail, ph->buffer, bytes - avail);
+        memcpy(((uint8_t *)buf) + avail, ph->buffer, bytes - avail);
     }
     else
         memcpy(buf, ph->buffer + ph->head, bytes);
@@ -564,7 +519,7 @@ done:
 }
 
 /* Write to a pty endpoint */
-static ssize_t pty_write(void * h, const void * buf, size_t bytes) {
+static ssize_t pty_write(void *h, const void *buf, size_t bytes) {
     size_t avail;
     pipefd_t *fdobj;
     ptyhalf_t *ph;
@@ -580,7 +535,7 @@ static ssize_t pty_write(void * h, const void * buf, size_t bytes) {
     /* Special case the unattached console */
     if(ph->id == 0 && !ph->master && ph->other->refcnt == 0) {
         /* This actually blocks, but fooey.. :) */
-        dbgio_write_buffer_xlat((const uint8 *)buf, bytes);
+        dbgio_write_buffer_xlat((const uint8_t *)buf, bytes);
         return bytes;
     }
 
@@ -617,7 +572,7 @@ static ssize_t pty_write(void * h, const void * buf, size_t bytes) {
     if((ph->tail + bytes) > PTY_BUFFER_SIZE) {
         avail = PTY_BUFFER_SIZE - ph->tail;
         memcpy(ph->buffer + ph->tail, buf, avail);
-        memcpy(ph->buffer, ((const uint8 *)buf) + avail, bytes - avail);
+        memcpy(ph->buffer, ((const uint8_t *)buf) + avail, bytes - avail);
     }
     else
         memcpy(ph->buffer + ph->tail, buf, bytes);
@@ -635,9 +590,9 @@ done:
 }
 
 /* Get total size. For this we return the number of bytes available for reading. */
-static size_t pty_total(void * h) {
-    pipefd_t    * fdobj;
-    ptyhalf_t   * ph;
+static size_t pty_total(void *h) {
+    pipefd_t    *fdobj;
+    ptyhalf_t   *ph;
 
     fdobj = (pipefd_t *)h;
     ph = fdobj->d.p;
@@ -651,9 +606,9 @@ static size_t pty_total(void * h) {
 }
 
 /* Read a directory entry */
-static dirent_t * pty_readdir(void * h) {
-    pipefd_t * fdobj = (pipefd_t *)h;
-    dirlist_t * dl;
+static const dirent_t *pty_readdir(void *h) {
+    pipefd_t *fdobj = (pipefd_t *)h;
+    dirlist_t *dl;
 
     assert(h);
 
@@ -680,7 +635,7 @@ static dirent_t * pty_readdir(void * h) {
 static int pty_stat(vfs_handler_t *vfs, const char *path, struct stat *st,
                     int flag) {
     ptyhalf_t *ph;
-    int id;
+    unsigned int id;
     int master;
     size_t len = strlen(path);
 
@@ -699,7 +654,7 @@ static int pty_stat(vfs_handler_t *vfs, const char *path, struct stat *st,
     }
 
     /* Handle paths that start directly with '/maXX' or '/slXX' */
-    if(sscanf(path, "/%2c%02x", (char[3]){}, &id) != 2) {
+    if(sscanf(path, "/%*2c%02x", &id) != 2) {
         errno = ENOENT;
         return -1;
     }
@@ -800,8 +755,8 @@ static int pty_fstat(void *h, struct stat *st) {
 
     memset(st, 0, sizeof(struct stat));
     st->st_dev = (dev_t)('p' | ('t' << 8) | ('y' << 16));
-    st->st_mode = (fd->mode & O_DIR) ? 
-        (S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO) : 
+    st->st_mode = (fd->mode & O_DIR) ?
+        (S_IFDIR | S_IRWXU | S_IRWXG | S_IRWXO) :
         (S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH);
     st->st_size = (fd->mode & O_DIR) ? -1 : (off_t)fd->d.p->cnt;
     st->st_blksize = (fd->mode & O_DIR) ? 0 : 1;
@@ -855,8 +810,8 @@ static int initted = 0;
 
 /* Initialize the file system */
 void fs_pty_init(void) {
-    int cm, cs;
-    int tm, ts;
+    file_t cm, cs;
+    file_t tm, ts;
 
     if(initted)
         return;
@@ -889,7 +844,8 @@ void fs_pty_shutdown(void) {
     if(!initted)
         return;
 
-    mutex_lock_irqsafe(&list_mutex);
+    /* If we fail, we proceed anyways */
+    mutex_trylock(&list_mutex);
 
     /* Go through and free all the pty entries */
     c = LIST_FIRST(&ptys);

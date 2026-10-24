@@ -28,12 +28,11 @@
 #ifndef __KOS_LIBRARY_H
 #define __KOS_LIBRARY_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
-#include <kos/thread.h>
 #include <kos/elf.h>
-#include <kos/fs.h>
+#include <sys/queue.h>
 
 /** \defgroup system_libraries  Libraries
     \brief                      API for managing dynamically loaded libraries
@@ -49,8 +48,7 @@ TAILQ_HEAD(klqueue, klibrary);
 LIST_HEAD(kllist, klibrary);
 /** \endcond */
 
-/* Thread IDs are ok for us */
-typedef tid_t libid_t;                  /**< \brief Library ID type. */
+typedef int libid_t;   /**< \brief Library ID type. */
 
 /** \brief  Loaded library structure.
 
@@ -61,7 +59,7 @@ typedef tid_t libid_t;                  /**< \brief Library ID type. */
     Each loaded library should export at least the functions described in this
     structure:
     \li     const char *lib_get_name()
-    \li     uint32 %lib_get_version()
+    \li     uint32_t %lib_get_version()
     \li     int lib_open(struct klibrary *lib)
     \li     int lib_close(struct klibrary *lib)
 

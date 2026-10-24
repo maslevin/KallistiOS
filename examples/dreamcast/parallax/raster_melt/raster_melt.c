@@ -5,7 +5,14 @@
 */
 
 #include <kos.h>
+
+/* Allow both old kos-ports location and standard */
+#if __has_include("png/png.h")
 #include <png/png.h>
+#else
+#include <png.h>
+#endif
+
 #include <plx/texture.h>
 #include <plx/context.h>
 #include <plx/prim.h>
@@ -57,7 +64,6 @@ int main(int argc, char **argv) {
         MAPLE_FOREACH_END()
 
         // Setup the frame
-        pvr_wait_ready();
         pvr_scene_begin();
         pvr_list_begin(PVR_LIST_OP_POLY);
 

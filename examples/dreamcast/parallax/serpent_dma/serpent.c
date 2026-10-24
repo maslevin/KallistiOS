@@ -23,8 +23,8 @@ vertex DMA usage as well as showing off interleaved polygon type usage, etc.
 */
 
 // These are in perfmeter.c
-void pm_init();
-void pm_draw();
+void pm_init(void);
+void pm_draw(void);
 
 /* Draws a sphere out of GL_QUADS according to the syntax of glutSolidSphere
 
@@ -111,7 +111,7 @@ static void sphere(sphere_t *s) { /* {{{ */
     }
 }
 
-static void draw_sphere(sphere_t *s, int list) {
+static void draw_sphere(sphere_t *s, pvr_list_t list) {
     void * sqd;
     pvr_vertex_t *v, *vd;
 
@@ -155,7 +155,7 @@ static void draw_sphere(sphere_t *s, int list) {
 static float r = 0;
 static void sphere_frame(void) {
     int i;
-    //uint64 start;
+    //uint64_t start;
 
     if(!big_sphere.data)
         sphere(&big_sphere);
@@ -163,7 +163,6 @@ static void sphere_frame(void) {
     if(!small_sphere.data)
         sphere(&small_sphere);
 
-    pvr_wait_ready();
     pvr_scene_begin();
 
     //start = timer_ms_gettime64();
@@ -209,9 +208,9 @@ static void sphere_frame(void) {
     plx_mat3d_pop();
 
     // Fake spending more time on vertices
-    //timer_spin_sleep(15);
+    //thd_sleep(15);
 
-    //printf("%d\n", (uint32)(timer_ms_gettime64() - start));
+    //printf("%d\n", (uint32_t)(timer_ms_gettime64() - start));
 
     r++;
     phase += 2 * F_PI / 240.0f;
@@ -268,7 +267,7 @@ pvr_init_params_t params = {
 
 // DMA buffers. This should ideally be in separate memory banks to take
 // advantage of greater speed, but this will work for now.
-uint8 dmabuffers[2][4 * 1024 * 1024] __attribute__((aligned(32)));
+uint8_t dmabuffers[2][4 * 1024 * 1024] __attribute__((aligned(32)));
 
 int main(int argc, char **argv) {
     /* Init PVR API */
@@ -295,7 +294,7 @@ int main(int argc, char **argv) {
     do_sphere_test();
 
     pvr_get_stats(&stats);
-    dbglog(DBG_DEBUG, "3D Stats: %u vblanks, frame rate ~%f fps, max vertex used %u bytes\n",
+    dbglog(DBG_INFO, "3D Stats: %u vblanks, frame rate ~%f fps, max vertex used %u bytes\n",
            stats.vbl_count, stats.frame_rate, stats.vtx_buffer_used_max);
 
     free(big_sphere.data);

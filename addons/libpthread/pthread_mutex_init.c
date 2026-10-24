@@ -7,12 +7,12 @@
 
 #include "pthread-internal.h"
 #include <pthread.h>
-#include <errno.h>
+#include <kos/errno.h>
 #include <kos/mutex.h>
 
 int pthread_mutex_init(pthread_mutex_t *__RESTRICT mutex,
                        const pthread_mutexattr_t *__RESTRICT attr) {
-    int type = MUTEX_TYPE_NORMAL, old, rv = 0;
+    unsigned int type = MUTEX_TYPE_NORMAL;
 
     if(attr) {
         switch(attr->mtype) {
@@ -21,9 +21,6 @@ int pthread_mutex_init(pthread_mutex_t *__RESTRICT mutex,
                 break;
 
             case PTHREAD_MUTEX_ERRORCHECK:
-                type = MUTEX_TYPE_ERRORCHECK;
-                break;
-
             case PTHREAD_MUTEX_RECURSIVE:
                 type = MUTEX_TYPE_RECURSIVE;
                 break;
@@ -31,12 +28,13 @@ int pthread_mutex_init(pthread_mutex_t *__RESTRICT mutex,
             default:
                 return EINVAL;
         }
+
+        mutex->type = attr->mtype;
+    } else {
+        mutex->type = PTHREAD_MUTEX_NORMAL;
     }
 
-    old = errno;
-    if(mutex_init(&mutex->mutex, type))
-        rv = errno;
+    errno_save_scoped();
 
-    errno = old;
-    return rv;
+    return errno_if_nonzero(mutex_init(&mutex->mutex, type));
 }

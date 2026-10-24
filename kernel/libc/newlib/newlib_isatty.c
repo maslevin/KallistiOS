@@ -11,16 +11,11 @@
 #include <string.h>
 #include <errno.h>
 
-#include <sys/reent.h>
+#include <reent.h>
 #include <kos/fs.h>
 
 int isatty(int fd) {
     vfs_handler_t *vh;
-
-    if(fd < 0) {
-        errno = EBADF;
-        return 0;
-    }
 
     /* Make sure that stdin is shown as a tty, otherwise
        it won't be set as line-buffered. */

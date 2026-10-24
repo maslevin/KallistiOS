@@ -26,30 +26,7 @@
    and translucent lists, and 0's for everything else; 512k of vertex
    buffer. This is equivalent to the old ta_init_defaults() for now. */
 int pvr_init_defaults(void) {
-    const pvr_init_params_t params = {
-        /* Enable opaque and translucent polygons with size 16 */
-        { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_0 },
-
-        /* Vertex buffer size 512K */
-        512 * 1024,
-
-        /* No DMA */
-        0,
-
-        /* No FSAA */
-        0,
-
-        /* Translucent Autosort enabled. */
-        0,
-
-        /* Extra OPBs */
-        3,
-
-        /* Vertex buffer double-buffering enabled */
-        0
-    };
-
-    return pvr_init(&params);
+    return pvr_init(&pvr_default_params);
 }
 
 /* Initialize the PVR chip to ready status, enabling the specified lists
@@ -57,6 +34,8 @@ int pvr_init_defaults(void) {
    come from the texture memory pool! Expects that a 2D mode was
    initialized already using the vid_* API. */
 int pvr_init(const pvr_init_params_t *params) {
+    uint16_t vscale = 1024;
+
     /* If we're already initialized, fail */
     if(pvr_state.valid == 1) {
         dbglog(DBG_WARNING, "pvr: pvr_init called twice!\n");
@@ -71,7 +50,7 @@ int pvr_init(const pvr_init_params_t *params) {
     assert(vid_mode->width != 0 && vid_mode->height != 0);
 
     /* Check for compatibility with 3D stuff */
-    if((vid_mode->width % 32) != 0) {
+    if(!__is_aligned(vid_mode->width, 32)) {
         dbglog(DBG_WARNING, "pvr: mode %dx%d isn't usable for 3D (width not multiples of 32)\n",
                vid_mode->width, vid_mode->height);
         return -1;
@@ -87,10 +66,10 @@ int pvr_init(const pvr_init_params_t *params) {
     /* Start off with a nice empty structure */
     memset((void *)&pvr_state, 0, sizeof(pvr_state));
 
-    // Enable DMA if the user wants that.
+    /* Enable DMA if the user wants that. */
     pvr_state.dma_mode = params->dma_enabled;
 
-    // Copy over FSAA setting.
+    /* Copy over FSAA setting. */
     pvr_state.fsaa = params->fsaa_enabled;
 
     pvr_state.vbuf_doublebuf = !params->vbuf_doublebuf_disabled;
@@ -98,22 +77,16 @@ int pvr_init(const pvr_init_params_t *params) {
     /* Everything's clear, do the initial buffer pointer setup */
     pvr_allocate_buffers(params);
 
-    // Initialize tile matrices
+    /* Initialize tile matrices */
     pvr_init_tile_matrices(!!params->autosort_disabled);
 
-    // Setup all pipeline targets. Yes, this is redundant. :) I just
-    // like to have it explicit.
-    pvr_state.ram_target = 0;
-    pvr_state.ta_target = 0;
-    pvr_state.view_target = 0;
+    pvr_state.list_reg_open = PVR_LIST_NONE;
 
-    pvr_state.list_reg_open = -1;
-
-    // Sync all the hardware registers with our pipeline state.
+    /* Sync all the hardware registers with our pipeline state. */
     pvr_sync_view();
     pvr_sync_reg_buffer();
 
-    // Clear out our stats
+    /* Clear out our stats */
     pvr_state.vbl_count = 0;
     pvr_state.frame_last_time = 0;
     pvr_state.buf_start_time = 0;
@@ -125,29 +98,29 @@ int pvr_init(const pvr_init_params_t *params) {
     pvr_state.rnd_last_len = -1;
     pvr_state.vtx_buf_used = 0;
     pvr_state.vtx_buf_used_max = 0;
-    pvr_state.dr_used = 0;
 
     /* If we're on a VGA box, disable vertical smoothing */
     if(vid_mode->cable_type == CT_VGA) {
         dbglog(DBG_KDEBUG, "pvr: disabling vertical scaling for VGA\n");
-
-        if(pvr_state.fsaa)
-            PVR_SET(PVR_SCALER_CFG, 0x10400);
-        else
-            PVR_SET(PVR_SCALER_CFG, 0x400);
+    } else {
+        /* If using an interlaced video mode, enable vertical smoothing ("flicker filter"),
+           otherwise disable it */
+        if(vid_mode->flags & VID_INTERLACE) {
+            dbglog(DBG_KDEBUG, "pvr: enabling vertical scaling for interlaced non-VGA\n");
+            vscale++;
+        } else {
+            dbglog(DBG_KDEBUG, "pvr: disabling vertical scaling for progressive non-VGA\n");
+        }
     }
-    else {
-        dbglog(DBG_KDEBUG, "pvr: enabling vertical scaling for non-VGA\n");
 
-        if(pvr_state.fsaa)
-            PVR_SET(PVR_SCALER_CFG, 0x10401);
-        else
-            PVR_SET(PVR_SCALER_CFG, 0x401);
-    }
+    /* Set horizontal / vertical scale factors */
+    PVR_SET(PVR_SCALER_CFG,
+            FIELD_PREP(PVR_SCALER_CFG_FSAA, pvr_state.fsaa) |
+            FIELD_PREP(PVR_SCALER_CFG_VSCALE_FACTOR, vscale));
 
     /* Hook the PVR interrupt events on G2 */
     pvr_state.vbl_handle = vblank_handler_add(pvr_vblank_handler, NULL);
-    
+
     asic_evt_set_handler(ASIC_EVT_PVR_OPAQUEDONE, pvr_int_handler, NULL);
     asic_evt_enable(ASIC_EVT_PVR_OPAQUEDONE, ASIC_IRQ_DEFAULT);
     asic_evt_set_handler(ASIC_EVT_PVR_OPAQUEMODDONE, pvr_int_handler, NULL);
@@ -161,8 +134,8 @@ int pvr_init(const pvr_init_params_t *params) {
     asic_evt_set_handler(ASIC_EVT_PVR_RENDERDONE_TSP, pvr_int_handler, NULL);
     asic_evt_enable(ASIC_EVT_PVR_RENDERDONE_TSP, ASIC_IRQ_DEFAULT);
 
+    /* Hook up interrupt handlers for error events */
     if(__is_defined(PVR_RENDER_DBG)) {
-        /* Hook up interrupt handlers for error events */
         asic_evt_set_handler(ASIC_EVT_PVR_ISP_OUTOFMEM, pvr_int_handler, NULL);
         asic_evt_enable(ASIC_EVT_PVR_ISP_OUTOFMEM, ASIC_IRQ_DEFAULT);
         asic_evt_set_handler(ASIC_EVT_PVR_STRIP_HALT, pvr_int_handler, NULL);
@@ -178,38 +151,34 @@ int pvr_init(const pvr_init_params_t *params) {
     /* 3d-specific parameters; these are all about rendering and
        nothing to do with setting up the video; some stuff in here
        is still unknown. */
-    PVR_SET(PVR_UNK_00A8, 0x15d1c951);      /* M (Unknown magic value) */
-    PVR_SET(PVR_UNK_00A0, 0x00000020);      /* M */
+    PVR_SET(PVR_SDRAM_CFG, 0x15d1c951);         /* M (Unknown magic value) */
+    PVR_SET(PVR_SDRAM_REFRESH, 0x00000020);     /* M */
     /* PVR_FB_CFG_2 is configured in vid_set_mode() */
-    PVR_SET(PVR_UNK_0110, 0x00093f39);      /* M */
-    PVR_SET(PVR_UNK_0098, 0x00800408);      /* M */
+    PVR_SET(PVR_FB_BURSTCTRL, 0x00093f39);      /* M */
+    PVR_SET(PVR_ISP_FEED_CFG, 0x00800408);      /* M */
     PVR_SET(PVR_TEXTURE_CLIP, 0x00000000);      /* texture clip distance */
     PVR_SET(PVR_SPANSORT_CFG, 0x00000101);      /* M */
-    PVR_SET(PVR_FOG_TABLE_COLOR, 0x007f7f7f);   /* Fog table color */
-    PVR_SET(PVR_FOG_VERTEX_COLOR, 0x007f7f7f);  /* Fog vertex color */
-    PVR_SET(PVR_COLOR_CLAMP_MIN, 0x00000000);   /* color clamp min */
-    PVR_SET(PVR_COLOR_CLAMP_MAX, 0xffffffff);   /* color clamp max */
-    PVR_SET(PVR_UNK_0080, 0x00000007);      /* M */
+    pvr_fog_table_color(0.0f, 0.5f, 0.5f, 0.5f);/* Fog table color */
+    pvr_fog_vertex_color(0.5f, 0.5f, 0.5f);     /* Fog vertex color */
+    PVR_SET(PVR_COLOR_CLAMP_MIN, PVR_PACK_COLOR(0, 0, 0, 0));   /* color clamp min */
+    PVR_SET(PVR_COLOR_CLAMP_MAX, PVR_PACK_COLOR(1, 1, 1, 1));   /* color clamp max */
+    PVR_SET(PVR_HALF_OFFSET, 0x00000007);       /* M */
     PVR_SET(PVR_CHEAP_SHADOW, 0x00000001);      /* cheap shadow */
-    PVR_SET(PVR_UNK_007C, 0x0027df77);      /* M */
+    PVR_SET(PVR_FPU_PARAM_CFG, 0x0027df77);     /* M */
     PVR_SET(PVR_TEXTURE_MODULO, 0x00000000);    /* stride width */
     PVR_SET(PVR_FOG_DENSITY, 0x0000ff07);       /* fog density */
-    PVR_SET(PVR_UNK_0118, 0x00008040);      /* M */
+    PVR_SET(PVR_Y_COEFF, 0x00008040);           /* M */
 
     /* Initialize PVR DMA */
-    mutex_init((mutex_t *)&pvr_state.dma_lock, MUTEX_TYPE_NORMAL);
+    sem_init((semaphore_t *)&pvr_state.dma_lock, 1);
     pvr_dma_init();
 
     /* Set us as valid and return success */
     pvr_state.valid = 1;
 
     /* Validate our memory pool */
+    pvr_mem_initialize((pvr_ptr_t)(PVR_RAM_INT_BASE + pvr_state.texture_base), PVR_RAM_SIZE - pvr_state.texture_base);
     pvr_mem_reset();
-    /* This doesn't work right now... */
-    /*#ifndef NDEBUG
-        dbglog(DBG_KDEBUG, "pvr: free memory is %08lx bytes\n",
-            pvr_mem_available());
-    #endif*//* !NDEBUG */
 
     return 0;
 }
@@ -246,10 +215,11 @@ int pvr_shutdown(void) {
     pvr_dma_shutdown();
 
     /* Invalidate our memory pool */
+    pvr_mem_initialize((pvr_ptr_t)NULL, 0);
     pvr_mem_reset();
 
     /* Destroy the mutex */
-    mutex_destroy((mutex_t *)&pvr_state.dma_lock);
+    sem_destroy((semaphore_t *)&pvr_state.dma_lock);
 
     /* Clear video memory */
     vid_empty();

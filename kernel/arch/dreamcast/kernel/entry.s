@@ -1,8 +1,9 @@
 ! KallistiOS ##version##
 !
 !   arch/dreamcast/kernel/entry.s
-!   (c)2000-2001 Megan Potter
+!   Copyright (C) 2000, 2001 Megan Potter
 !   Copyright (C) 2023 Paul Cercueil <paul@crapouillou.net>
+!   Copyright (C) 2025 Falco Girgis
 !
 ! Assembler code for entry and exit to/from the kernel via exceptions
 !
@@ -111,8 +112,12 @@ _irq_save_regs:
 
 	! Before we enter the main C code again, re-enable exceptions
 	! (but not interrupts) so we can still debug inside handlers.
-	bsr		_irq_disable
-	nop
+	mov.l		irqd_and,r1
+	mov.l		irqd_or,r2
+	stc  		sr,r0
+	and  		r0,r1
+	or    		r2,r1
+	ldc  		r1,sr
 
 	! R4 still contains the exception code
 	mov.l		hdl_except,r2	! Call handle_exception
@@ -121,6 +126,12 @@ _irq_save_regs:
 	bra		_save_regs_finish
 	nop
 
+	.align 2
+irqd_and:
+	.long	0xefffff0f
+irqd_or:
+	.long	0x000000f0
+
 ! irq_force_return() jumps here; make sure we're in register
 ! bank 1 (as opposed to 0)
 _irq_force_return:
@@ -128,15 +139,6 @@ _irq_force_return:
 	stc	sr,r0
 	or	r1,r0
 	ldc	r0,sr
-	bra	_save_regs_finish
-	nop
-	
-	.align 2
-_irqfr_or:
-	.long	0x20000000
-stkaddr:
-	.long	krn_stack
-
 
 ! Now restore all the registers and jump back to the thread
 _save_regs_finish:
@@ -198,6 +200,10 @@ _save_regs_finish:
 	nop
 
 	.align 2
+_irqfr_or:
+	.long	0x20000000
+stkaddr:
+	.long	krn_stack
 _irq_srt_addr:
 	.long	0	! Save Regs Table -- this is an indirection
 			! so we can easily swap out pointers during a
@@ -332,61 +338,3 @@ _vma_table_600:		! IRQs
 	nop
 	bra	_irq_save_regs
 	mov	#3,r4			! Set exception code
-
-
-! Disable interrupts, but leave exceptions enabled. Returns the old
-! interrupt status.
-!
-! Calling this inside an exception/interrupt handler will generally not have
-! any effect.
-!
-	.globl	_irq_disable
-_irq_disable:
-	mov.l	_irqd_and,r1
-	mov.l	_irqd_or,r2
-	stc	sr,r0
-	and	r0,r1
-	or	r2,r1
-	ldc	r1,sr
-	rts
-	nop
-	
-	.align 2
-_irqd_and:
-	.long	0xefffff0f
-_irqd_or:
-	.long	0x000000f0
-
-
-! Enable interrupts and exceptions. Returns the old interrupt status.
-!
-! Call this inside an exception/interrupt handler only with GREAT CARE.
-!
-	.globl	_irq_enable
-_irq_enable:
-	mov.l	_irqe_and,r1
-	stc	sr,r0
-	and	r0,r1
-	ldc	r1,sr
-	rts
-	nop
-	
-	.align 2
-_irqe_and:
-	.long	0xefffff0f
-
-
-! Restore interrupts to the state returned by irq_disable()
-! or irq_enable().
-	.globl	_irq_restore
-_irq_restore:
-	ldc	r4,sr
-	rts
-	nop
-
-
-! Retrieve SR
-	.globl	_irq_get_sr
-_irq_get_sr:
-	rts
-	stc	sr,r0

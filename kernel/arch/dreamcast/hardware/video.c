@@ -209,9 +209,9 @@ uint32_t      *vram_l;
    [This is the old KOS function by Megan.]
 */
 int8_t vid_check_cable(void) {
-    volatile uint32_t * porta = (vuint32 *)0xff80002c;
+    volatile uint32_t *porta = (volatile uint32_t *)0xff80002c;
 
-    if (KOS_PLATFORM_IS_NAOMI) {
+    if(hardware_sys_mode(NULL) != HW_TYPE_RETAIL) {
         /* XXXX: This still needs to be figured out for NAOMI. For now, assume
            VGA mode. */
         return CT_VGA;
@@ -220,15 +220,15 @@ int8_t vid_check_cable(void) {
     *porta = (*porta & 0xfff0ffff) | 0x000a0000;
 
     /* Read port8 and port9 */
-    return (*((volatile uint16_t*)(porta + 1)) >> 8) & 3;
+    return (*((volatile uint16_t *)(porta + 1)) >> 8) & 3;
 }
 
 /*-----------------------------------------------------------------------------*/
 void vid_set_mode(int dm, vid_pixel_mode_t pm) {
     vid_mode_t mode;
-    int i, ct, found, mb;
+    int i, found, mb;
 
-    ct = vid_check_cable();
+    int8_t ct = vid_check_cable();
 
     /* Remove the multi-buffering flag from the mode, if its present, and save
        the state of that flag. */
@@ -292,31 +292,29 @@ void vid_set_mode(int dm, vid_pixel_mode_t pm) {
 }
 
 enum pvr_pm_modes {
-	PVR_PM_XRGB1555,
-	PVR_PM_RGB565,
-	PVR_PM_ARGB4444,
-	PVR_PM_ARGB1555,
-	PVR_PM_RGB888,
-	PVR_PM_XRGB8888,
-	PVR_PM_ARGB8888,
-	PVR_PM_DITHER = 8,
+    PVR_PM_XRGB1555,
+    PVR_PM_RGB565,
+    PVR_PM_ARGB4444,
+    PVR_PM_ARGB1555,
+    PVR_PM_RGB888,
+    PVR_PM_XRGB8888,
+    PVR_PM_ARGB8888,
+    PVR_PM_DITHER = 8,
 };
 
 static const unsigned int vid_bpp_to_pvr_cfg2[] = {
-	[PM_RGB555] = PVR_PM_XRGB1555 | PVR_PM_DITHER,
-	[PM_RGB565] = PVR_PM_RGB565 | PVR_PM_DITHER,
-	[PM_RGB888P] = PVR_PM_RGB888,
-	[PM_RGB0888] = PVR_PM_XRGB8888,
+    [PM_RGB555] = PVR_PM_XRGB1555 | PVR_PM_DITHER,
+    [PM_RGB565] = PVR_PM_RGB565 | PVR_PM_DITHER,
+    [PM_RGB888P] = PVR_PM_RGB888,
+    [PM_RGB0888] = PVR_PM_XRGB8888,
 };
 
 /*-----------------------------------------------------------------------------*/
 void vid_set_mode_ex(vid_mode_t *mode) {
-    uint16_t ct;
     uint32_t data;
 
-
     /* Verify cable type for video mode. */
-    ct = vid_check_cable();
+    int8_t ct = vid_check_cable();
 
     if(mode->cable_type != CT_ANY) {
         if(mode->cable_type != ct) {
@@ -435,7 +433,7 @@ void vid_set_mode_ex(vid_mode_t *mode) {
     vid_flip(0);
 
     /* Set cable type */
-    *((vuint32*)0xa0702c00) = (*((vuint32*)0xa0702c00) & 0xfffffcff) |
+    *((volatile uint32_t *)0xa0702c00) = (*((volatile uint32_t *)0xa0702c00) & 0xfffffcff) |
         ((ct & 3) << 8);
 
     /* Re-enable the display */

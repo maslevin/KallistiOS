@@ -1,20 +1,24 @@
 /* KallistiOS ##version##
 
-   maple_init.c
+   maple_init_shutdown.c
    Copyright (C) 2002 Megan Potter
+   Copyright (C) 2026 Ruslan Rostovtsev
  */
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <arch/memory.h>
+#include <arch/arch.h>
+#include <dc/memory.h>
 #include <dc/maple.h>
 #include <dc/asic.h>
 #include <dc/vblank.h>
 #include <kos/thread.h>
 #include <kos/init.h>
 #include <kos/dbglog.h>
+#include <kos/genwait.h>
 
 #include <dc/maple/controller.h>
 #include <dc/maple/keyboard.h>
@@ -24,6 +28,7 @@
 #include <dc/maple/sip.h>
 #include <dc/maple/dreameye.h>
 #include <dc/maple/lightgun.h>
+#include <dc/maple/mie.h>
 
 /*
   This system handles low-level communication/initialization of the maple
@@ -35,18 +40,80 @@
 
 */
 
+static void maple_dev_reset_cb(maple_state_t *st, maple_frame_t *frame) {
+    (void)st;
+
+    /* Unlock the frame */
+    maple_frame_unlock(frame);
+
+    /* Wake up! */
+    genwait_wake_all(frame);
+}
+
+static void maple_dev_reset(maple_device_t *dev) {
+
+    assert(dev != NULL);
+
+    /* Lock the frame */
+    maple_frame_lock(&dev->frame);
+
+    /* Reset the frame */
+    maple_frame_init(&dev->frame);
+    dev->frame.cmd = MAPLE_COMMAND_RESET;
+    dev->frame.dst_port = dev->port;
+    dev->frame.dst_unit = dev->unit;
+    dev->frame.length = 0;
+    dev->frame.callback = maple_dev_reset_cb;
+    maple_queue_frame(&dev->frame);
+
+    /* Wait for the device to accept it */
+    if(genwait_wait(&dev->frame, "dev_reset", 500) < 0) {
+        if(dev->frame.state != MAPLE_FRAME_VACANT) {
+            /* Something went wrong.... */
+            dev->frame.state = MAPLE_FRAME_VACANT;
+            dbglog(DBG_ERROR, "dev_reset: timeout to unit %c%c\n",
+                   dev->port + 'A', dev->unit + '0');
+        }
+    }
+
+    dbglog(DBG_KDEBUG, "dev_reset: reset sent to unit %c%c\n",
+                   dev->port + 'A', dev->unit + '0');
+
+    return;
+}
+
+static void maple_dev_reset_all(void) {
+    /* Skip controllers: a RESET re-zeroes their analog axes at the current
+       position, so triggers/stick held at exit stay miscalibrated. */
+    MAPLE_FOREACH_BEGIN(MAPLE_FUNC_ANY & ~MAPLE_FUNC_CONTROLLER, void, st)
+        maple_dev_reset(__dev);
+        (void)st;
+    MAPLE_FOREACH_END()
+}
+
+static uint8_t maple_dma_addr_prot_byte(uint32_t addr) {
+    return ((((addr) & MEM_AREA_CACHE_MASK) >> 20) - 0x80) & 0xff;
+}
+
+static uint32_t maple_dma_mem_protection(void) {
+    uint32_t ram_lo, ram_hi;
+
+    ram_lo = maple_dma_addr_prot_byte(0x0c000000);
+    ram_hi = maple_dma_addr_prot_byte(_arch_mem_top - 1);
+    return MAPLE_DMA_PROT_MAGIC | (ram_lo << 8) | ram_hi;
+}
+
 /* Initialize Hardware (call after driver inits) */
 static void maple_hw_init(void) {
     maple_driver_t *drv;
-    int p, u;
 
     dbglog(DBG_INFO, "maple: active drivers:\n");
 
     /* Reset structures */
-    for(p = 0; p < MAPLE_PORT_COUNT; p++) {
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; p++) {
         maple_state.ports[p].port = p;
 
-        for(u = 0; u < MAPLE_UNIT_COUNT; u++)
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; u++)
             maple_state.ports[p].units[u] = NULL;
     }
 
@@ -64,10 +131,10 @@ static void maple_hw_init(void) {
         maple_state.dma_buffer = aligned_alloc(32, MAPLE_DMA_SIZE);
 
     assert_msg(maple_state.dma_buffer != NULL, "Couldn't allocate maple DMA buffer");
-    assert_msg((((uint32)maple_state.dma_buffer) & 0x1f) == 0, "DMA buffer was unaligned; bug in dlmalloc; please report!");
+    assert_msg(__is_aligned((uint32_t)maple_state.dma_buffer, 32), "DMA buffer was unaligned; bug in dlmalloc; please report!");
 
     /* Force it into the P2 area */
-    maple_state.dma_buffer = (uint8*)((((uint32)maple_state.dma_buffer) & MEM_AREA_CACHE_MASK) | MEM_AREA_P2_BASE);
+    maple_state.dma_buffer = (uint8_t *)((((uint32_t)maple_state.dma_buffer) & MEM_AREA_CACHE_MASK) | MEM_AREA_P2_BASE);
 
     if(__is_defined(MAPLE_DMA_DEBUG)) {
         maple_state.dma_buffer += 512;
@@ -75,18 +142,19 @@ static void maple_hw_init(void) {
     }
 
     maple_state.dma_in_progress = 0;
-    dbglog(DBG_INFO, "  DMA Buffer at %08lx\n", (uint32)maple_state.dma_buffer);
+    dbglog(DBG_SOURCE(MAPLE_DMA_DEBUG), "  DMA Buffer at %08lx\n", (uint32_t)maple_state.dma_buffer);
 
     /* Initialize other misc stuff */
     maple_state.vbl_cntr = maple_state.dma_cntr = 0;
     maple_state.detect_port_next = 0;
     maple_state.scan_ready_mask = 0;
+    maple_state.port0_mie = 0;
     maple_state.gun_port = -1;
     maple_state.gun_x = maple_state.gun_y = -1;
 
     /* Reset hardware */
-    maple_write(MAPLE_RESET1, MAPLE_RESET1_MAGIC);
-    maple_write(MAPLE_RESET2, MAPLE_RESET2_MAGIC);
+    maple_write(MAPLE_DMA_PROT, maple_dma_mem_protection());
+    maple_write(MAPLE_DMA_TSEL, MAPLE_DMA_TSEL_SOFTWARE);
     maple_write(MAPLE_SPEED, MAPLE_SPEED_2MBPS | MAPLE_SPEED_TIMEOUT(50000));
     maple_bus_enable();
 
@@ -99,9 +167,10 @@ static void maple_hw_init(void) {
 /* Turn off the maple bus, free mem */
 /* AGGG!! Someone save me from this idiotic voodoo bug fixing crap.. */
 void maple_hw_shutdown(void) {
-    int p, u, cnt;
-    uint32  ptr;
-    maple_device_t *dev;
+    size_t cnt = 0;
+
+    /* Reset all devices to leave them as we found them */
+    maple_dev_reset_all();
 
     /* Unhook interrupts */
     vblank_handler_remove(maple_state.vbl_handle);
@@ -118,7 +187,7 @@ void maple_hw_shutdown(void) {
 
     /* We must cast this back to P1 or cache issues will arise */
     if(maple_state.dma_buffer != NULL) {
-        ptr = (uint32)maple_state.dma_buffer;
+        uint32_t ptr = (uint32_t)maple_state.dma_buffer;
 
         if(__is_defined(MAPLE_DMA_DEBUG))
             ptr -= 512;
@@ -129,14 +198,12 @@ void maple_hw_shutdown(void) {
     }
 
     /* Free any attached devices */
-    for(cnt = 0, p = 0; p < MAPLE_PORT_COUNT; p++) {
-        for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
-            cnt += !!maple_driver_detach(p, u);
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; p++) {
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; u++) {
+            cnt += !maple_driver_detach(p, u);
 
-            dev = maple_state.ports[p].units[u];
-            if(dev)
-                free(dev->status);
-            free(dev);
+            free(maple_state.ports[p].units[u]);
+            maple_state.ports[p].units[u] = NULL;
         }
     }
 
@@ -144,24 +211,29 @@ void maple_hw_shutdown(void) {
            cnt, maple_state.vbl_cntr, maple_state.dma_cntr);
 }
 
+static int maple_scan_done(maple_state_t *state) {
+    return state->scan_ready_mask == 0xf;
+}
+
+KOS_INIT_FLAG_WEAK(mie_init_scan, __is_defined(_arch_sub_naomi));
+
 /* Wait for the initial bus scan to complete */
 void maple_wait_scan(void) {
-    int     p, u;
-    maple_device_t  *dev;
 
     /* Wait for it to finish */
-    while(maple_state.scan_ready_mask != 0xf)
-        thd_pass();
+    thd_poll((thd_cb_t)maple_scan_done, &maple_state, 0);
+
+    KOS_INIT_FLAG_CALL(mie_init_scan);
 
     /* Enumerate everything */
     dbglog(DBG_INFO, "maple: attached devices:\n");
 
-    for(p = 0; p < MAPLE_PORT_COUNT; p++) {
-        for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
-            dev = maple_enum_dev(p, u);
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; p++) {
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; u++) {
+            maple_device_t *dev = maple_enum_dev(p, u);
 
             if(dev) {
-                dbglog(DBG_INFO, "  %c%c: %.30s (%08lx: %s)\n",
+                dbglog(DBG_INFO, "  %c%c: %-30.30s (%08lx: %s)\n",
                        'A' + p, '0' + u,
                        dev->info.product_name,
                        dev->info.functions, maple_pcaps(dev->info.functions));
@@ -178,6 +250,7 @@ KOS_INIT_FLAG_WEAK(vmu_init, true);
 KOS_INIT_FLAG_WEAK(purupuru_init, true);
 KOS_INIT_FLAG_WEAK(sip_init, true);
 KOS_INIT_FLAG_WEAK(dreameye_init, true);
+KOS_INIT_FLAG_WEAK(mie_init, __is_defined(_arch_sub_naomi));
 
 /* Full init: initialize known drivers and start maple operations */
 void maple_init(void) {
@@ -189,6 +262,7 @@ void maple_init(void) {
     KOS_INIT_FLAG_CALL(purupuru_init);
     KOS_INIT_FLAG_CALL(sip_init);
     KOS_INIT_FLAG_CALL(dreameye_init);
+    KOS_INIT_FLAG_CALL(mie_init);
 
     maple_hw_init();
 }
@@ -201,11 +275,11 @@ KOS_INIT_FLAG_WEAK(vmu_shutdown, true);
 KOS_INIT_FLAG_WEAK(purupuru_shutdown, true);
 KOS_INIT_FLAG_WEAK(sip_shutdown, true);
 KOS_INIT_FLAG_WEAK(dreameye_shutdown, true);
+KOS_INIT_FLAG_WEAK(mie_shutdown, __is_defined(_arch_sub_naomi));
 
-/* Full shutdown: shutdown maple operations and known drivers */
+/* Full shutdown: shutdown each driver, then all hardware operations. */
 void maple_shutdown(void) {
-    maple_hw_shutdown();
-
+    KOS_INIT_FLAG_CALL(mie_shutdown);
     KOS_INIT_FLAG_CALL(dreameye_shutdown);
     KOS_INIT_FLAG_CALL(sip_shutdown);
     KOS_INIT_FLAG_CALL(purupuru_shutdown);
@@ -214,4 +288,6 @@ void maple_shutdown(void) {
     KOS_INIT_FLAG_CALL(kbd_shutdown);
     KOS_INIT_FLAG_CALL(cont_shutdown);
     KOS_INIT_FLAG_CALL(lightgun_shutdown);
+
+    maple_hw_shutdown();
 }

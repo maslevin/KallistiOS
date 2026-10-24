@@ -9,8 +9,19 @@
  * by Twada
  */
 #include <kos.h>
+
+/* Allow both old kos-ports location and standard */
+#if __has_include("png/png.h")
 #include <png/png.h>
+#else
+#include <png.h>
+#endif
+#if __has_include("zlib/zlib.h")
 #include <zlib/zlib.h>
+#else
+#include <zlib.h>
+#endif
+
 #include "pvr_zclip.h"
 
 /* textures */
@@ -117,31 +128,30 @@ static void draw_modifier(matrix_t *pvm)
         vol[i].cz = transform[index[i][2]][2];
     }
     pvr_mod_compile(&hdr, PVR_LIST_OP_MOD, PVR_MODIFIER_INCLUDE_LAST_POLY, PVR_CULLING_SMALL);
-    hdr.cmd |= (1 << 6); /* Last poly */
     pvr_modifier_commit_zclip(&hdr, vol, 12);
 }
 
 static void draw_box(matrix_t *pvm)
 {
     pvr_vertex_t poly[18] = {
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0xffffffff, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{1.0f, 0.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 1.0f}}, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, {{0.0f, 0.0f}}, 0xffffffff, 0x00000000},
     };
     float vert[8][3] = {
         {-1.0f, -1.0f, 1.0f},
@@ -201,10 +211,10 @@ static void draw_plane(matrix_t *pvm)
     pvr_poly_cxt_t cxt;
     pvr_poly_hdr_t hdr;
     pvr_vertex_t poly[4] = {
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0xffff0000, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0xff00ff00, 0x00000000},
-        {PVR_CMD_VERTEX, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0xff0000ff, 0x00000000},
-        {PVR_CMD_VERTEX_EOL, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0xffffffff, 0x00000000},
+        {PVR_CMD_VERTEX,     0.0f, 0.0f, 0.0f, {{0.0f, 1.0f}}, 0xffff0000, 0x00000000},
+        {PVR_CMD_VERTEX,     0.0f, 0.0f, 0.0f, {{0.0f, 0.0f}}, 0xff00ff00, 0x00000000},
+        {PVR_CMD_VERTEX,     0.0f, 0.0f, 0.0f, {{1.0f, 1.0f}}, 0xff0000ff, 0x00000000},
+        {PVR_CMD_VERTEX_EOL, 0.0f, 0.0f, 0.0f, {{1.0f, 0.0f}}, 0xffffffff, 0x00000000},
     };
     float vert[4][3] = {
         {-5.0f, 0.0f, 5.0f},
@@ -286,7 +296,6 @@ int main(int argc, char* argv[])
         mat_lookat(&cam_pos, &cam_tar, &cam_up);
         mat_store(&cam_pvm);
 
-        pvr_wait_ready();
         pvr_scene_begin();
 
         pvr_list_begin(PVR_LIST_OP_POLY);

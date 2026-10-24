@@ -11,16 +11,17 @@
 
 #include <dc/g1ata.h>
 #include <dc/asic.h>
+#include <dc/memory.h>
 
+#include <kos/cache.h>
 #include <kos/dbglog.h>
+#include <kos/irq.h>
 #include <kos/sem.h>
 #include <kos/mutex.h>
 #include <kos/thread.h>
+#include <kos/timer.h>
 
-#include <arch/timer.h>
-#include <arch/cache.h>
-#include <arch/irq.h>
-#include <arch/memory.h>
+#include <arch/arch.h>
 
 /*
    This file implements support for accessing devices over the G1 bus by the
@@ -176,16 +177,14 @@ static uint8_t orig_dev = 0x00;
 
 /* Variables related to DMA. */
 static int dma_in_progress = 0;
-static int dma_blocking = 0;
 static uint8_t dma_cmd = 0;
 static size_t dma_nb_sectors = 0;
 static uint64_t dma_sector = 0;
 static semaphore_t dma_done = SEM_INITIALIZER(0);
-static kthread_t *dma_thd = NULL;
 static asic_evt_handler_entry_t old_dma_irq;
 
 /* From cdrom.c */
-extern mutex_t _g1_ata_mutex;
+extern semaphore_t _g1_ata_sem;
 
 #define g1_ata_wait_status(n) \
     do {} while((IN8(G1_ATA_ALTSTATUS) & (n)))
@@ -210,16 +209,15 @@ int g1_dma_in_progress(void) {
 
 /* G1 mutex handling. */
 inline int g1_ata_mutex_lock(void) {
-    if(irq_inside_int())
-        return mutex_trylock(&_g1_ata_mutex);
-    else
-        return mutex_lock(&_g1_ata_mutex);
+    return sem_wait_irqsafe(&_g1_ata_sem);
 }
 
 inline int g1_ata_mutex_unlock(void) {
     /* Make sure to select the GD-ROM drive back. */
-    g1_ata_select_device(G1_ATA_MASTER);
-    return mutex_unlock(&_g1_ata_mutex);
+    if(hardware_sys_mode(NULL) == HW_TYPE_RETAIL) {
+        g1_ata_select_device(G1_ATA_MASTER);
+    }
+    return sem_signal(&_g1_ata_sem);
 }
 
 static void g1_ata_set_sector_and_count(uint64_t sector, size_t count, int lba28) {
@@ -241,20 +239,18 @@ static void g1_ata_set_sector_and_count(uint64_t sector, size_t count, int lba28
 
 static void g1_dma_done(void) {
     /* Signal the calling thread to continue, if it is blocking. */
-    if(dma_blocking) {
+    if(sem_count(&dma_done)) {
         sem_signal(&dma_done);
-        thd_schedule(1, 0);
-        dma_blocking = 0;
+        thd_schedule(true);
     }
 
     dma_in_progress = 0;
 
     /* Make sure to select the GD-ROM drive back. */
-    g1_ata_select_device(G1_ATA_MASTER);
-    mutex_unlock_as_thread(&_g1_ata_mutex, dma_thd);
+    g1_ata_mutex_unlock();
 }
 
-static void g1_dma_irq_hnd(uint32 code, void *data) {
+static void g1_dma_irq_hnd(uint32_t code, void *data) {
     int can_lba48 = CAN_USE_LBA48();
     size_t nb_sectors;
     uint8_t status;
@@ -305,6 +301,12 @@ static void g1_dma_irq_hnd(uint32 code, void *data) {
     }
 }
 
+static int g1_ata_dma_done(void *d) {
+    (void)d;
+
+    return !g1_dma_in_progress();
+}
+
 /* Set the device select register to select a particular device. */
 uint8_t g1_ata_select_device(uint8_t dev) {
     uint8_t old = IN8(G1_ATA_DEVICE_SELECT);
@@ -324,8 +326,7 @@ uint8_t g1_ata_select_device(uint8_t dev) {
         }
         else {
             /* Wait for any in-progress DMA transfers to finish. */
-            while(g1_dma_in_progress())
-                thd_pass();
+            thd_poll((thd_cb_t)g1_ata_dma_done, NULL, 0);
 
             /* According to section 7.10 of the ATA-5 spec, setting the device
                select register with either of BSY or DRQ asserted produces an
@@ -357,12 +358,6 @@ static int dma_common(uint8_t cmd, size_t nsects, uint32_t addr, int dir,
     uint8_t status;
 
     dma_cmd = cmd;
-
-    /* Set the thread ID that initiated this DMA. */
-    dma_thd = thd_current;
-
-    if(irq_inside_int())
-        dma_thd = (kthread_t *)0xFFFFFFFF;
 
     /* Set the DMA parameters up. */
     OUT32(G1_ATA_DMA_ADDRESS, addr);
@@ -730,7 +725,6 @@ int g1_ata_read_lba_dma(uint64_t sector, size_t count, void *buf,
     }
 
     /* Set the settings for this transfer and re-enable IRQs. */
-    dma_blocking = block;
     dma_in_progress = 1;
     dma_nb_sectors = count;
     dma_sector = sector;
@@ -898,7 +892,7 @@ int g1_ata_write_lba_dma(uint64_t sector, size_t count, const void *buf,
     */
     if((addr & MEM_AREA_P2_BASE) != MEM_AREA_P2_BASE) {
         /* Flush the dcache over the range of the data. */
-        dcache_flush_range(addr, count * 512);
+        dcache_wback_range(addr, count * 512);
     }
 
     /* Use the physical memory address. */
@@ -921,7 +915,6 @@ int g1_ata_write_lba_dma(uint64_t sector, size_t count, const void *buf,
     }
 
     /* Set the settings for this transfer and re-enable IRQs. */
-    dma_blocking = block;
     dma_in_progress = 1;
     dma_nb_sectors = count;
     dma_sector = sector;
@@ -965,7 +958,7 @@ int g1_ata_flush(void) {
 
     /* Select the slave device. */
     g1_ata_select_device(G1_ATA_SLAVE | G1_ATA_LBA_MODE);
-    timer_spin_sleep(1);
+    thd_sleep(1);
 
     /* Flush the disk's write cache to make sure everything gets written out. */
     if(CAN_USE_LBA48())
@@ -973,7 +966,7 @@ int g1_ata_flush(void) {
     else
         OUT8(G1_ATA_COMMAND_REG, ATA_CMD_FLUSH_CACHE);
 
-    timer_spin_sleep(1);
+    thd_sleep(1);
     g1_ata_wait_bsydrq();
     g1_ata_mutex_unlock();
 
@@ -1006,7 +999,7 @@ static int g1_ata_set_transfer_mode(uint8_t mode) {
 
     /* Send the SET FEATURES command. */
     OUT8(G1_ATA_COMMAND_REG, ATA_CMD_SET_FEATURES);
-    timer_spin_sleep(1);
+    thd_sleep(1);
 
     /* Wait for command completion. */
     g1_ata_wait_nbsy();
@@ -1034,7 +1027,7 @@ static int g1_ata_scan(void) {
     /* For now, just check if there's a slave device. We don't care about the
        primary device, since it should always be the GD-ROM drive. */
     OUT8(G1_ATA_DEVICE_SELECT, 0xF0);
-    timer_spin_sleep(1);
+    thd_sleep(1);
 
     OUT8(G1_ATA_SECTOR_COUNT, 0);
     OUT8(G1_ATA_LBA_LOW, 0);
@@ -1043,7 +1036,7 @@ static int g1_ata_scan(void) {
 
     /* Send the IDENTIFY command. */
     OUT8(G1_ATA_COMMAND_REG, ATA_CMD_IDENTIFY);
-    timer_spin_sleep(1);
+    thd_sleep(1);
     st = IN8(G1_ATA_STATUS_REG);
 
     /* Check if there's anything on the bus. */
@@ -1150,7 +1143,7 @@ static int atab_shutdown(kos_blockdev_t *d) {
     return 0;
 }
 
-static int atab_read_blocks(kos_blockdev_t *d, uint64_t block, size_t count,
+static int atab_read_blocks(const kos_blockdev_t *d, uint64_t block, size_t count,
                             void *buf) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
 
@@ -1162,7 +1155,7 @@ static int atab_read_blocks(kos_blockdev_t *d, uint64_t block, size_t count,
     return g1_ata_read_lba(block + data->start_block, count, (uint16_t *)buf);
 }
 
-static int atab_read_blocks_dma(kos_blockdev_t *d, uint64_t block, size_t count,
+static int atab_read_blocks_dma(const kos_blockdev_t *d, uint64_t block, size_t count,
                                 void *buf) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
 
@@ -1174,7 +1167,7 @@ static int atab_read_blocks_dma(kos_blockdev_t *d, uint64_t block, size_t count,
     return g1_ata_read_lba_dma(block + data->start_block, count, buf, 1);
 }
 
-static int atab_write_blocks(kos_blockdev_t *d, uint64_t block, size_t count,
+static int atab_write_blocks(const kos_blockdev_t *d, uint64_t block, size_t count,
                              const void *buf) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
 
@@ -1186,7 +1179,7 @@ static int atab_write_blocks(kos_blockdev_t *d, uint64_t block, size_t count,
     return g1_ata_write_lba(block + data->start_block, count, buf);
 }
 
-static int atab_write_blocks_dma(kos_blockdev_t *d, uint64_t block,
+static int atab_write_blocks_dma(const kos_blockdev_t *d, uint64_t block,
                                  size_t count, const void *buf) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
 
@@ -1198,7 +1191,7 @@ static int atab_write_blocks_dma(kos_blockdev_t *d, uint64_t block,
     return g1_ata_write_lba_dma(block + data->start_block, count, buf, 1);
 }
 
-static int atab_read_blocks_chs(kos_blockdev_t *d, uint64_t block, size_t count,
+static int atab_read_blocks_chs(const kos_blockdev_t *d, uint64_t block, size_t count,
                                 void *buf) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
     uint8_t h, s;
@@ -1218,7 +1211,7 @@ static int atab_read_blocks_chs(kos_blockdev_t *d, uint64_t block, size_t count,
     return g1_ata_read_chs(c, h, s, count, buf);
 }
 
-static int atab_write_blocks_chs(kos_blockdev_t *d, uint64_t block,
+static int atab_write_blocks_chs(const kos_blockdev_t *d, uint64_t block,
                                  size_t count, const void *buf) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
     uint8_t h, s;
@@ -1238,7 +1231,7 @@ static int atab_write_blocks_chs(kos_blockdev_t *d, uint64_t block,
     return g1_ata_write_chs(c, h, s, count, buf);
 }
 
-static uint64_t atab_count_blocks(kos_blockdev_t *d) {
+static uint64_t atab_count_blocks(const kos_blockdev_t *d) {
     ata_devdata_t *data = (ata_devdata_t *)d->dev_data;
 
     return (uint32_t)data->block_count;

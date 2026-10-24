@@ -27,12 +27,13 @@
 #ifndef __DC_MAPLE_VMU_H
 #define __DC_MAPLE_VMU_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 #include <dc/maple.h>
 #include <kos/regfield.h>
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -112,12 +113,12 @@ int vmu_has_241_blocks(maple_device_t *dev);
                 for a very few commercial games.
 
     \param  dev             The device to enable/disable 41 blocks.
-    \param  enable          Values other than 0 enables. Equal to 0 disables.
+    \param  enable          True enables. false disables.
 
     \retval 0               On success
     \retval -1              On failure
 */
-int vmu_toggle_241_blocks(maple_device_t *dev, int enable);
+int vmu_toggle_241_blocks(maple_device_t *dev, bool enable);
 
 /** \brief   Enable custom color of a VMU
     \ingroup vmu_settings
@@ -126,14 +127,14 @@ int vmu_toggle_241_blocks(maple_device_t *dev, int enable);
     This color is only displayed in the Dreamcast's file manager.
 
     \param  dev             The device to enable/disable custom color.
-    \param  enable          Values other than 0 enables. Equal to 0 disables.
+    \param  enable          True enables. false disables.
 
     \retval 0               On success
     \retval -1              On failure
 
     \sa vmu_set_custom_color
 */
-int vmu_use_custom_color(maple_device_t *dev, int enable);
+int vmu_use_custom_color(maple_device_t *dev, bool enable);
 
 /** \brief   Set custom color of a VMU
     \ingroup vmu_settings
@@ -253,7 +254,7 @@ int vmu_get_icon_shape(maple_device_t *dev, uint8_t *icon_shape);
 
     \retval MAPLE_EOK       On success.
     \retval MAPLE_EAGAIN    If the command couldn't be sent. Try again later.
-    \retval MAPLE_ETIMEOUT  If the command timed out while blocking.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 
     \sa vmu_draw_lcd_rotated, vmu_draw_lcd_xbm, vmu_set_icon
 */
@@ -275,7 +276,7 @@ int vmu_draw_lcd(maple_device_t *dev, const void *bitmap);
     \param  bitmap          The bitmap to show.
     \retval MAPLE_EOK       On success.
     \retval MAPLE_EAGAIN    If the command couldn't be sent. Try again later.
-    \retval MAPLE_ETIMEOUT  If the command timed out while blocking.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 
     \sa vmu_draw_lcd, vmu_draw_lcd_xbm, vmu_set_icon
 */
@@ -292,7 +293,7 @@ int vmu_draw_lcd_rotated(maple_device_t *dev, const void *bitmap);
 
     \retval MAPLE_EOK       On success.
     \retval MAPLE_EAGAIN    If the command couldn't be sent. Try again later.
-    \retval MAPLE_ETIMEOUT  If the command timed out while blocking.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 
     \sa vmu_draw_lcd, vmu_set_icon
 */
@@ -413,7 +414,7 @@ int vmu_block_write(maple_device_t *dev, uint16_t blocknum, const uint8_t *buffe
 
     \retval MAPLE_EOK       On success.
     \retval MAPLE_EAGAIN    If the command couldn't be sent. Try again later.
-    \retval MAPLE_ETIMEOUT  If the command timed out while blocking.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 
     \sa vmu_beep_waveform
 */
@@ -475,7 +476,7 @@ int vmu_beep_raw(maple_device_t *dev, uint32_t beep);
 
     \retval MAPLE_EOK           On success.
     \retval MAPLE_EAGAIN        If the command couldn't be sent. Try again later.
-    \retval MAPLE_ETIMEOUT      If the command timed out while blocking.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 */
 int vmu_beep_waveform(maple_device_t *dev, uint8_t period1, uint8_t duty_cycle1, uint8_t period2, uint8_t duty_cycle2);
 
@@ -498,6 +499,7 @@ int vmu_beep_waveform(maple_device_t *dev, uint8_t period1, uint8_t duty_cycle1,
     \retval MAPLE_EOK       On success.
     \retval MAPLE_ETIMEOUT  If the command timed out while blocking.
     \retval MAPLE_EFAIL     On errors other than timeout.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 
     \sa vmu_get_datetime
 */
@@ -518,6 +520,7 @@ int vmu_set_datetime(maple_device_t *dev, time_t unix);
     \retval MAPLE_EOK       On success.
     \retval MAPLE_ETIMEOUT  If the command timed out while blocking.
     \retval MAPLE_EFAIL     On errors other than timeout.
+    \retval MAPLE_EINVALID  The device does not support this functionality (VMS).
 
     \sa vmu_set_datetime
 */
@@ -610,7 +613,7 @@ typedef struct vmu_state {
 
     \sa vmu_get_buttons_enabled
 */
-void vmu_set_buttons_enabled(int enable);
+void vmu_set_buttons_enabled(bool enable);
 
 /** \brief   Check whether polling for VMU input has been enabled
     \ingroup maple_clock
@@ -624,7 +627,7 @@ void vmu_set_buttons_enabled(int enable);
 
     \sa vmu_set_buttons_enabled
 */
-int vmu_get_buttons_enabled(void);
+bool vmu_get_buttons_enabled(void);
 
 /** @} */
 

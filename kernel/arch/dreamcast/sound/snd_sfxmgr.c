@@ -19,7 +19,7 @@
 #include <sys/ioctl.h>
 #include <kos/dbglog.h>
 #include <kos/fs.h>
-#include <arch/irq.h>
+#include <kos/irq.h>
 #include <dc/spu.h>
 #include <dc/sound/sound.h>
 #include <dc/sound/sfxmgr.h>
@@ -50,24 +50,10 @@ static uint64_t sfx_inuse = 0;
 
 /* Unload all loaded samples and free their SPU RAM */
 void snd_sfx_unload_all(void) {
-    snd_effect_t *t, *n;
+    snd_effect_t *t;
 
-    t = LIST_FIRST(&snd_effects);
-
-    while(t) {
-        n = LIST_NEXT(t, list);
-
-        snd_mem_free(t->locl);
-
-        if(t->stereo)
-            snd_mem_free(t->locr);
-
-        free(t);
-
-        t = n;
-    }
-
-    LIST_INIT(&snd_effects);
+    while((t = LIST_FIRST(&snd_effects)))
+        snd_sfx_unload((sfxhnd_t)t);
 }
 
 /* Unload a single sample */
@@ -146,7 +132,7 @@ static int read_wav_header(file_t fd, wavhdr_t *wavhdr) {
             return -1;
         }
 
-        /* If it is the fmt chunk, grab the fields we care about and skip the 
+        /* If it is the fmt chunk, grab the fields we care about and skip the
            rest of the section if there is more */
         if(strncmp((const char *)wavhdr->chunk.id, "fmt ", 4) == 0) {
             if(fs_read(fd, &(wavhdr->fmt), sizeof(wavhdr->fmt)) != sizeof(wavhdr->fmt)) {
@@ -154,7 +140,7 @@ static int read_wav_header(file_t fd, wavhdr_t *wavhdr) {
                 return -1;
             }
 
-            /* Skip the rest of the fmt chunk */ 
+            /* Skip the rest of the fmt chunk */
             fs_seek(fd, wavhdr->chunk.size - sizeof(wavhdr->fmt), SEEK_CUR);
         }
         /* If we found the data chunk, we are done */
@@ -162,7 +148,7 @@ static int read_wav_header(file_t fd, wavhdr_t *wavhdr) {
             break;
         }
         /* Skip meta data */
-        else { 
+        else {
             fs_seek(fd, wavhdr->chunk.size, SEEK_CUR);
         }
     } while(1);
@@ -193,13 +179,13 @@ static int read_wav_header_buf(char *buf, wavhdr_t *wavhdr, size_t *bufidx) {
         memcpy(&(wavhdr->chunk), buf + tmp_bufidx, sizeof(wavhdr->chunk));
         tmp_bufidx += sizeof(wavhdr->chunk);
 
-        /* If it is the fmt chunk, grab the fields we care about and skip the 
+        /* If it is the fmt chunk, grab the fields we care about and skip the
            rest of the section if there is more */
         if(strncmp((const char *)wavhdr->chunk.id, "fmt ", 4) == 0) {
             memcpy(&(wavhdr->fmt), buf + tmp_bufidx, sizeof(wavhdr->fmt));
             tmp_bufidx += sizeof(wavhdr->fmt);
 
-            /* Skip the rest of the fmt chunk */ 
+            /* Skip the rest of the fmt chunk */
             tmp_bufidx += wavhdr->chunk.size - sizeof(wavhdr->fmt);
         }
         /* If we found the data chunk, we are done */
@@ -207,7 +193,7 @@ static int read_wav_header_buf(char *buf, wavhdr_t *wavhdr, size_t *bufidx) {
             break;
         }
         /* Skip meta data */
-        else { 
+        else {
             tmp_bufidx += wavhdr->chunk.size;
         }
     } while(1);
@@ -259,7 +245,7 @@ static snd_effect_t *create_snd_effect(wavhdr_t *wavhdr, uint8_t *wav_data) {
     snd_effect_t *effect;
     uint32_t len, rate;
     uint16_t channels, bitsize, fmt;
-    
+
     effect = malloc(sizeof(snd_effect_t));
     if(effect == NULL)
         return NULL;
@@ -396,7 +382,7 @@ sfxhnd_t snd_sfx_load(const char *fn) {
 
     /* Open the sound effect file */
     fd = fs_open(fn, O_RDONLY);
-    if(fd <= FILEHND_INVALID) {
+    if(fd == FILEHND_INVALID) {
         dbglog(DBG_ERROR, "snd_sfx_load: can't open %s\n", fn);
         return SFXHND_INVALID;
     }
@@ -448,7 +434,7 @@ sfxhnd_t snd_sfx_load_ex(const char *fn, uint32_t rate, uint16_t bitsize, uint16
     sfxhnd_t effect;
     file_t fd = fs_open(fn, O_RDONLY);
 
-    if(fd <= FILEHND_INVALID) {
+    if(fd == FILEHND_INVALID) {
         dbglog(DBG_ERROR, "snd_sfx_load_ex: can't open sfx %s\n", fn);
         return SFXHND_INVALID;
     }
@@ -520,6 +506,9 @@ sfxhnd_t snd_sfx_load_fd(file_t fd, size_t len, uint32_t rate, uint16_t bitsize,
     */
     if(read_len > 0) {
         tmp_buff = aligned_alloc(32, read_len);
+
+        if(!tmp_buff)
+            goto err_occurred;
 
         if(fs_read(fd, tmp_buff, read_len) <= 0) {
             goto err_occurred;
@@ -678,6 +667,8 @@ sfxhnd_t snd_sfx_load_raw_buf(char *buf, size_t len, uint32_t rate, uint16_t bit
     read_len = chan_len;
     if(read_len > 0) {
         tmp_buff = aligned_alloc(32, read_len);
+        if(!tmp_buff)
+            goto err_occurred;
         memcpy(tmp_buff, buf, read_len);
         bufidx += read_len;
 
@@ -755,18 +746,13 @@ int find_free_channel(void) {
 }
 
 int snd_sfx_play(sfxhnd_t idx, int vol, int pan) {
-    sfx_play_data_t data = {0};
-    data.chn = -1;
-    data.idx = idx;
-    data.vol = vol;
-    data.pan = pan;
-    return snd_sfx_play_ex(&data);
+    return snd_sfx_play_chn(-1, idx, vol, pan);
 }
 
 int snd_sfx_play_ex(sfx_play_data_t *data) {
-    if (data->chn < 0) {
+    if(data->chn < 0) {
         data->chn = find_free_channel();
-        if (data->chn < 0) {
+        if(data->chn < 0) {
             return -1;
         }
     }

@@ -10,35 +10,34 @@
 #include <stdint.h>
 #include <errno.h>
 
-#include <arch/types.h>
 #include <kos/dbglog.h>
-#include <kos/fs_dev.h>
+#include <kos/fs.h>
 #include <sys/queue.h>
 
 /* File handle structure; this is an entirely internal structure so it does
    not go in a header file. */
 typedef struct dev_hnd {
-    nmmgr_handler_t * handler;
-    void *      hnd;        /* Handler-internal */
-    int     refcnt;     /* Reference count */
+    nmmgr_handler_t *handler;
+    void *hnd;       /* Handler-internal */
+    int  refcnt;     /* Reference count */
 } dev_hnd_t;
 
 static dev_hnd_t dev_root_hnd = {0};
 static dirent_t dev_readdir_dirent;
 
-static dirent_t *dev_root_readdir(dev_hnd_t * handle) {
+static dirent_t *dev_root_readdir(dev_hnd_t *handle) {
     nmmgr_handler_t *nmhnd;
     nmmgr_list_t    *nmhead;
-    int         cnt;
+    uintptr_t        cnt;
 
-    cnt = (int)handle->hnd;
+    cnt = (uintptr_t)handle->hnd;
 
     nmhead = nmmgr_get_list();
 
-    LIST_FOREACH(nmhnd, nmhead, list_ent) {
+    SLIST_FOREACH(nmhnd, nmhead, list_ent) {
         if(!(nmhnd->flags & NMMGR_FLAGS_INDEV))
             continue;
-        
+
         if(!(cnt--))
             break;
     }
@@ -46,21 +45,23 @@ static dirent_t *dev_root_readdir(dev_hnd_t * handle) {
     if(nmhnd == NULL)
         return NULL;
 
-    dev_readdir_dirent.size = -1;
+    /* Entries in /dev are special files */
+    dev_readdir_dirent.size = 0;
+    dev_readdir_dirent.time = 0;
+    dev_readdir_dirent.attr = 0;
 
     strcpy(dev_readdir_dirent.name, nmhnd->pathname + strlen("/dev/"));
 
-    handle->hnd = (void *)((int)handle->hnd + 1);
+    handle->hnd = (void *)((uintptr_t)handle->hnd + 1);
 
     return &dev_readdir_dirent;
 }
 
 
-static dirent_t *dev_readdir(void *f) {
-    dev_hnd_t * hnd = (dev_hnd_t *)f;
+static const dirent_t *dev_readdir(void *f) {
+    dev_hnd_t *hnd = (dev_hnd_t *)f;
 
-    if((!hnd) || (hnd != &dev_root_hnd)
-        || (hnd->refcnt <= 0)) {
+    if((!hnd) || (hnd != &dev_root_hnd) || (hnd->refcnt <= 0)) {
         errno = EBADF;
         return NULL;
     }
@@ -69,10 +70,9 @@ static dirent_t *dev_readdir(void *f) {
 }
 
 static int dev_rewinddir(void *f) {
-    dev_hnd_t * hnd = (dev_hnd_t *)f;
+    dev_hnd_t *hnd = (dev_hnd_t *)f;
 
-    if((!hnd) || (hnd != &dev_root_hnd)
-        || (hnd->refcnt <= 0)) {
+    if((!hnd) || (hnd != &dev_root_hnd) || (hnd->refcnt <= 0)) {
         errno = EBADF;
         return -1;
     }
@@ -84,13 +84,13 @@ static int dev_rewinddir(void *f) {
 }
 
 static void *dev_open(vfs_handler_t *vfs, const char *fn, int mode) {
-    (void)vfs;        
-    
+    (void)vfs;
+
     if(!strcmp(fn, "/") || !strcmp(fn, "")) {
         if((mode & O_DIR)) {
             dev_root_hnd.refcnt++;
             return &dev_root_hnd;
-        }   
+        }
         else {
             errno = EISDIR;
             return NULL;
@@ -105,12 +105,11 @@ static void *dev_open(vfs_handler_t *vfs, const char *fn, int mode) {
 
 /* Close a file and clean up the handle */
 static int dev_close(void *f) {
-    dev_hnd_t * hnd = (dev_hnd_t *)f;
+    dev_hnd_t *hnd = (dev_hnd_t *)f;
 
-    if((hnd != &dev_root_hnd)
-        || (hnd->refcnt <= 0)) {
-      errno = EBADF;
-      return -1;
+    if((hnd != &dev_root_hnd) || (hnd->refcnt <= 0)) {
+        errno = EBADF;
+        return -1;
     }
 
     hnd->refcnt--;
@@ -124,16 +123,23 @@ static int dev_close(void *f) {
 
 static int dev_stat(vfs_handler_t *vfs, const char *path, struct stat *st,
                     int flag) {
+    size_t len = strlen(path);
+
     (void)vfs;
-    (void)path;
     (void)flag;
+
+    /* Only the /dev root is handled; devices have own handlers. */
+    if(len != 0 && !(len == 1 && *path == '/')) {
+        errno = ENOENT;
+        return -1;
+    }
 
     memset(st, 0, sizeof(struct stat));
     st->st_dev = (dev_t)('d' | ('e' << 8) | ('v' << 16));
-    st->st_mode = S_IFDIR | S_IRUSR | S_IXUSR | S_IRGRP | 
+    st->st_mode = S_IFDIR | S_IRUSR | S_IXUSR | S_IRGRP |
         S_IXGRP | S_IROTH | S_IXOTH;
     st->st_size = -1;
-    st->st_nlink = 2 + 3; /* 2 + (number of subdirectories) */
+    st->st_nlink = 2;
 
     return 0;
 }

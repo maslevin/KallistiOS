@@ -20,7 +20,7 @@
 #include <assert.h>
 #include <errno.h>
 
-#include <arch/timer.h>
+#include <kos/timer.h>
 #include <kos/dbglog.h>
 #include <kos/genwait.h>
 #include <kos/sem.h>
@@ -41,8 +41,8 @@ static struct ktqueue timer_queue;
 
 /* Internal function to insert a thread on the timer queue. Maintains
    sorting order by wait time. */
-static void tq_insert(kthread_t * thd) {
-    kthread_t * t;
+static void __nonnull_all tq_insert(kthread_t *thd) {
+    kthread_t *t;
 
     /* Search for its place; note that new threads will be placed at
        the end of a group with the same timeout. */
@@ -58,24 +58,20 @@ static void tq_insert(kthread_t * thd) {
 }
 
 /* Internal function to remove a thread from the timer queue. */
-static void tq_remove(kthread_t * thd) {
+static void __nonnull_all tq_remove(kthread_t *thd) {
     TAILQ_REMOVE(&timer_queue, thd, timerq);
 }
 
 /* Returns the top thread on the timer queue (next event). If nothing is
    queued, we'll return NULL. */
-static kthread_t * tq_next(void) {
+static kthread_t *tq_next(void) {
     return TAILQ_FIRST(&timer_queue);
 }
 
-int genwait_wait(void * obj, const char * mesg, int timeout, void (*callback)(void *)) {
-    kthread_t   * me;
+int genwait_wait(void *obj, const char *mesg, unsigned int timeout) {
+    kthread_t   *me, *t;
 
-    /* Twiddle interrupt state */
-    if(irq_inside_int()) {
-        dbglog(DBG_WARNING, "genwait_wait: called inside interrupt\n");
-        return -1;
-    }
+    assert(!irq_inside_int());
 
     irq_disable_scoped();
 
@@ -93,66 +89,64 @@ int genwait_wait(void * obj, const char * mesg, int timeout, void (*callback)(vo
     else
         me->wait_timeout = 0;
 
-    me->wait_callback = callback;
+    /* Go through and find where to insert */
+    TAILQ_FOREACH(t, &slpque[LOOKUP(obj)], thdq) {
+        if(me->prio < t->prio) {
+            TAILQ_INSERT_BEFORE(t, me, thdq);
+            break;
+        }
+    }
 
-    /* Insert us on the appropriate wait queue */
-    TAILQ_INSERT_TAIL(&slpque[LOOKUP(obj)], me, thdq);
+    /* We got to the end of the list, so insert at end */
+    if(!t)
+        TAILQ_INSERT_TAIL(&slpque[LOOKUP(obj)], me, thdq);
 
     /* Block us until we're signaled */
     return thd_block_now(&me->context);
 }
 
 /* Removes a thread from its wait queue; assumes ints are disabled. */
-static void genwait_unqueue(kthread_t * thd) {
-    if(thd->wait_obj) {
-        /* Remove it from the queue */
-        TAILQ_REMOVE(&slpque[LOOKUP(thd->wait_obj)], thd, thdq);
+static void __nonnull_all genwait_unqueue(kthread_t *thd, int err) {
 
-        /* Also remove it from the timer queue if applicable */
-        if(thd->wait_timeout)
-            tq_remove(thd);
-
-        /* Clean up wait stuff */
-        thd->wait_obj = NULL;
-        thd->wait_msg = NULL;
-        thd->wait_timeout = 0;
-        thd->wait_callback = NULL;
-
-        /* Make it runnable again */
-        thd->state = STATE_READY;
-        thd_add_to_runnable(thd, 0);
+    /* Set the wake return value */
+    if(err) {
+        CONTEXT_RET(thd->context) = -1;
+        *thd_get_errno(thd) = err;
     }
+    else {
+        CONTEXT_RET(thd->context) = 0;
+    }
+
+    /* Remove it from the queue */
+    TAILQ_REMOVE(&slpque[LOOKUP(thd->wait_obj)], thd, thdq);
+
+    /* Also remove it from the timer queue if applicable */
+    if(thd->wait_timeout)
+        tq_remove(thd);
+
+    /* Clean up wait stuff */
+    thd->wait_obj = NULL;
+    thd->wait_msg = NULL;
+    thd->wait_timeout = 0;
+
+    /* Make it runnable again */
+    thd->state = STATE_READY;
+    thd_add_to_runnable(thd, 0);
 }
 
-int genwait_wake_cnt(void * obj, int cntmax, int err) {
-    kthread_t       * t, * nt;
-    struct slpquehead   * qp;
-    int         cnt;
+static int genwait_wake_thd_cnt(const void *obj, int cntmax, kthread_t *thd, int err) {
+    kthread_t       *t, *nt;
+    int         cnt = 0;
 
     /* Twiddle interrupt state */
     irq_disable_scoped();
 
-    /* Find the queue */
-    qp = &slpque[LOOKUP(obj)];
-
     /* Go through and find any matching entries */
-    for(cnt = 0, t = TAILQ_FIRST(qp); t != NULL; t = nt) {
-        /* Get the next thread up front */
-        nt = TAILQ_NEXT(t, thdq);
-
+    TAILQ_FOREACH_SAFE(t, &slpque[LOOKUP(obj)], thdq, nt) {
         /* Is this thread a match? */
-        if(t->wait_obj == obj) {
+        if(t->wait_obj == obj && (!thd || t == thd)) {
             /* Yes, remove it from the wait queue */
-            genwait_unqueue(t);
-
-            /* Set the wake return value */
-            if(err) {
-                CONTEXT_RET(t->context) = -1;
-                t->thd_errno = err;
-            }
-            else {
-                CONTEXT_RET(t->context) = 0;
-            }
+            genwait_unqueue(t, err);
 
             /* Check to see if we've filled our quota */
             if(cntmax > 0) {
@@ -167,90 +161,46 @@ int genwait_wake_cnt(void * obj, int cntmax, int err) {
     return cnt;
 }
 
-void genwait_wake_all(void * obj) {
+int genwait_wake_cnt(const void *obj, int cntmax, int err) {
+    return genwait_wake_thd_cnt(obj, cntmax, NULL, err);
+}
+
+void genwait_wake_all(const void *obj) {
     genwait_wake_cnt(obj, -1, 0);
 }
 
-void genwait_wake_one(void * obj) {
+void genwait_wake_one(const void *obj) {
     genwait_wake_cnt(obj, 1, 0);
 }
 
-void genwait_wake_one_err(void *obj, int err) {
+void genwait_wake_one_err(const void *obj, int err) {
     genwait_wake_cnt(obj, 1, err);
 }
 
-void genwait_wake_all_err(void *obj, int err) {
+void genwait_wake_all_err(const void *obj, int err) {
     genwait_wake_cnt(obj, -1, err);
 }
 
-int genwait_wake_thd(void *obj, kthread_t *thd, int err) {
-    kthread_t *t, *nt;
-    struct slpquehead *qp;
-
-    /* Twiddle interrupt state */
-    irq_disable_scoped();
-
-    /* Find the queue */
-    qp = &slpque[LOOKUP(obj)];
-
-    /* Go through and find any matching entries */
-    for(t = TAILQ_FIRST(qp); t != NULL; t = nt) {
-        /* Get the next thread up front */
-        nt = TAILQ_NEXT(t, thdq);
-
-        /* Is this thread a match? */
-        if(t->wait_obj == obj && t == thd) {
-            /* Yes, remove it from the wait queue */
-            genwait_unqueue(t);
-
-            /* Set the wake return value */
-            if(err) {
-                CONTEXT_RET(t->context) = -1;
-                t->thd_errno = err;
-            }
-            else {
-                CONTEXT_RET(t->context) = 0;
-            }
-
-            /* We found it, so we're done... */
-	    return 1;
-        }
-    }
-
-    return 0;
+int genwait_wake_thd(const void *obj, kthread_t *thd, int err) {
+    return genwait_wake_thd_cnt(obj, 1, thd, err);
 }
 
 void genwait_check_timeouts(uint64_t tm) {
     kthread_t   *t;
 
-    t = tq_next();
-
-    while(t) {
+    while((t = tq_next())) {
         /* If the next timeout is beyond our current time, then
            forget about it. */
         if(t->wait_timeout > tm)
             return;
 
-        /* Set an error code */
-        t->thd_errno = EAGAIN;  /* This is fairly close */
-        CONTEXT_RET(t->context) = -1;
-
-        /* If there's a callback, then call it */
-        if(t->wait_callback)
-            t->wait_callback(t->wait_obj);
-
-        /* Re-activate it */
-        genwait_unqueue(t);
-
-        /* Get the next one */
-        t = tq_next();
+        /* Re-activate it with an error code */
+        genwait_unqueue(t, EAGAIN);
     }
 }
 
 uint64_t genwait_next_timeout(void) {
-    kthread_t * t;
-
-    t = tq_next();
+    kthread_t *t = tq_next();
 
     if(t == NULL)
         return 0;
@@ -259,9 +209,7 @@ uint64_t genwait_next_timeout(void) {
 }
 
 int genwait_init(void) {
-    int i;
-
-    for(i = 0; i < TABLESIZE; i++)
+    for(size_t i = 0; i < TABLESIZE; i++)
         TAILQ_INIT(&slpque[i]);
 
     TAILQ_INIT(&timer_queue);

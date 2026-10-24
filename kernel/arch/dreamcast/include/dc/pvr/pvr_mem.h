@@ -26,7 +26,7 @@
 
 #include <stdint.h>
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 /** \defgroup pvr_vram   VRAM
@@ -40,7 +40,7 @@ __BEGIN_DECLS
     Unlike the old "TA" system, PVR pointers in the new system are actually SH-4
     compatible pointers and can be used directly in place of ta_txr_map().
 
-    Not that anyone probably even remembers the old TA system anymore... 
+    Not that anyone probably even remembers the old TA system anymore...
 */
 typedef void *pvr_ptr_t;
 
@@ -49,7 +49,7 @@ typedef void *pvr_ptr_t;
     \ingroup                 pvr_vram
 
     PVR memory management in KOS uses a modified dlmalloc; see the
-    source file pvr_mem_core.c for more info. 
+    source file pvr_mem_core.c for more info.
 */
 
 /** \brief   Allocate a chunk of memory from texture space.
@@ -61,7 +61,7 @@ typedef void *pvr_ptr_t;
     allocations will be aligned to a 32-byte boundary.
 
     \param  size            The amount of memory to allocate
-    
+
     \return                 A pointer to the memory on success, NULL on error
 */
 pvr_ptr_t pvr_mem_malloc(size_t size);
@@ -89,6 +89,14 @@ size_t pvr_mem_available(void);
     generally not many good reasons for doing this.
 */
 void pvr_mem_reset(void);
+
+/** \brief   Set the PVR RAM base address.
+    \ingroup pvr_mem_mgmt
+
+    This sets the base address for texture allocations.
+    pvr_mem_reset should be called after calling this function.
+*/
+void pvr_mem_initialize(pvr_ptr_t pvr_texture_base, size_t available_memory);
 
 /** \brief   Print the list of allocated blocks in the PVR RAM pool.
     \ingroup pvr_mem_mgmt

@@ -17,7 +17,7 @@
 #ifndef __ARCH_GDB_H
 #define __ARCH_GDB_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 /** \defgroup debugging_gdb GDB
@@ -47,4 +47,3 @@ void gdb_breakpoint(void);
 __END_DECLS
 
 #endif  /* __ARCH_GDB_H */
-

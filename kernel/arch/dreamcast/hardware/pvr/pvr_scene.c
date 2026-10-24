@@ -3,6 +3,7 @@
    pvr_scene.c
    Copyright (C) 2002,2004 Megan Potter
    Copyright (C) 2024 Falco Girgis
+   Copyright (C) 2026 Troy Davis
 
  */
 
@@ -41,9 +42,6 @@ void *pvr_set_vertbuf(pvr_list_t list, void *buffer, size_t len) {
     // that themselves.
     assert(pvr_state.dma_mode);
 
-    // Make sure it's a valid list.
-    assert(list < PVR_OPB_COUNT);
-
     // Make sure it's an _enabled_ list.
     assert(pvr_state.lists_enabled & BIT(list));
 
@@ -55,11 +53,11 @@ void *pvr_set_vertbuf(pvr_list_t list, void *buffer, size_t len) {
     oldbuf = pvr_state.dma_buffers[0].base[list];
 
     // Write new values.
-    pvr_state.dma_buffers[0].base[list] = (uint8 *)buffer;
+    pvr_state.dma_buffers[0].base[list] = (uint8_t *)buffer;
     pvr_state.dma_buffers[0].ptr[list] = 0;
     pvr_state.dma_buffers[0].size[list] = len / 2;
     pvr_state.dma_buffers[0].ready = 0;
-    pvr_state.dma_buffers[1].base[list] = ((uint8 *)buffer) + len / 2;
+    pvr_state.dma_buffers[1].base[list] = ((uint8_t *)buffer) + len / 2;
     pvr_state.dma_buffers[1].ptr[list] = 0;
     pvr_state.dma_buffers[1].size[list] = len / 2;
     pvr_state.dma_buffers[1].ready = 0;
@@ -68,10 +66,9 @@ void *pvr_set_vertbuf(pvr_list_t list, void *buffer, size_t len) {
 }
 
 void *pvr_vertbuf_tail(pvr_list_t list) {
-    uint8 *bufbase;
+    uint8_t *bufbase;
 
     // Check the validity of the request.
-    assert(list < PVR_OPB_COUNT);
     assert(pvr_state.dma_mode);
 
     // Get the buffer base.
@@ -83,10 +80,9 @@ void *pvr_vertbuf_tail(pvr_list_t list) {
 }
 
 void pvr_vertbuf_written(pvr_list_t list, size_t amt) {
-    uint32 val;
+    uint32_t val;
 
     // Check the validity of the request.
-    assert(list < PVR_OPB_COUNT);
     assert(pvr_state.dma_mode);
 
     // Change the current end of the buffer.
@@ -109,6 +105,9 @@ static void pvr_start_ta_rendering(void) {
         pvr_state.ta_checked_ready = 1;
         pvr_state.curr_to_texture = pvr_state.next_to_texture;
         pvr_state.to_txr_rp = pvr_state.next_to_txr_rp;
+        pvr_state.to_txr_w = pvr_state.next_to_txr_w;
+        pvr_state.to_txr_h = pvr_state.next_to_txr_h;
+        pvr_state.to_txr_stride_px = pvr_state.next_to_txr_stride_px;
         pvr_state.to_txr_addr = pvr_state.next_to_txr_addr;
 
         // Starting from that point, we consider that the Tile Accelerator
@@ -127,7 +126,7 @@ void pvr_scene_begin(void) {
     pvr_state.lists_closed = 0;
 
     // Get general stuff ready.
-    pvr_state.list_reg_open = -1;
+    pvr_state.list_reg_open = PVR_LIST_NONE;
 
     // Clear these out in case we're using DMA.
     if(pvr_state.dma_mode) {
@@ -136,7 +135,6 @@ void pvr_scene_begin(void) {
         }
 
         pvr_sync_stats(PVR_SYNC_BUFSTART);
-        // DBG(("pvr_scene_begin(dma -> %d)\n", pvr_state.ram_target));
     }
     else {
         // We assume registration is starting immediately
@@ -144,30 +142,31 @@ void pvr_scene_begin(void) {
     }
 }
 
-/* Begin collecting data for a frame of 3D output to the specified texture;
-   pass in the size of the buffer in rx and ry, and the return values in
-   rx and ry will be the size actually used (if changed). Note that
-   currently this only supports screen-sized output! */
-/* Currently the resize functionality is not implemented, so make sure that
-   rx and ry are appropriate (i.e. *rx = 1024 and *ry = 512 for 640x480).
-   Also, note that this probably won't work with DMA mode for now... */
-void pvr_scene_begin_txr(pvr_ptr_t txr, uint32 *rx, uint32 *ry) {
+void pvr_scene_begin_txr(pvr_ptr_t txr, uint32_t *rx, uint32_t *ry) {
     (void)ry;
 
-    /* For the most part, this isn't very much different than the normal render setup.
-       And, yes, if you remember KOS 1.1.6, this pretty much looks similar to what was
-       there. I'm quite uncreative with my variable naming ;) */
+    (void)pvr_scene_begin_rtt(txr, pvr_state.w, pvr_state.h, *rx);
+}
 
-    // Set the render pitch up
-    pvr_state.next_to_txr_rp = (*rx) * 2 / 8;
+int pvr_scene_begin_rtt(pvr_ptr_t txr, uint32_t render_w,
+                        uint32_t render_h, uint32_t stride_px) {
+    if(!txr || render_w == 0 || render_h == 0 || stride_px < render_w ||
+            (stride_px & 3))
+        return -1;
 
-    // Set the output address
-    pvr_state.next_to_txr_addr = (uint32)(txr) - PVR_RAM_INT_BASE;
+    /* The existing render-to-texture path programs a 16-bit render pitch in
+       64-bit units. Keep that behavior explicit for the sized RTT API. */
+    pvr_state.next_to_txr_rp = stride_px * 2 / 8;
+    pvr_state.next_to_txr_w = render_w;
+    pvr_state.next_to_txr_h = render_h;
+    pvr_state.next_to_txr_stride_px = stride_px;
+    pvr_state.next_to_txr_addr = (uint32_t)(txr) - PVR_RAM_INT_BASE;
 
     pvr_scene_begin();
 
-    // Mark us as rendering to a texture
     pvr_state.next_to_texture = 1;
+
+    return 0;
 }
 
 static bool pvr_list_dma;
@@ -189,7 +188,7 @@ int pvr_list_begin(pvr_list_t list) {
     }
 
     /* If we already had a list open, close it first */
-    if(pvr_state.list_reg_open != -1 && pvr_state.list_reg_open != (int)list)
+    if(pvr_state.list_reg_open != PVR_LIST_NONE && pvr_state.list_reg_open != list)
         pvr_list_finish();
 
     pvr_list_dma = pvr_list_uses_dma(list);
@@ -213,7 +212,7 @@ int pvr_list_begin(pvr_list_t list) {
    simplicity we just always submit a blank primitive. */
 int pvr_list_finish(void) {
     /* Check to make sure we can do this */
-    if(PVR_DEBUG && !pvr_state.dma_mode && pvr_state.list_reg_open == -1) {
+    if(PVR_DEBUG && !pvr_state.dma_mode && pvr_state.list_reg_open == PVR_LIST_NONE) {
         dbglog(DBG_WARNING, "pvr_list_finish: attempt to close unopened list\n");
         return -1;
     }
@@ -225,11 +224,6 @@ int pvr_list_finish(void) {
           with the list type, assume we're doing hybrid drawing and
           are directly submitting this list type. */
     if(!pvr_list_dma) {
-        /* Release Store Queues if they are used */
-        if(pvr_state.dr_used) {
-            pvr_dr_finish();
-        }
-
         /* In case we haven't sent anything in this list, send a dummy */
         pvr_blank_polyhdr(pvr_state.list_reg_open);
 
@@ -242,14 +236,14 @@ int pvr_list_finish(void) {
         pvr_sq_set32((void *)0, 0, 32, PVR_DMA_TA);
     }
 
-    pvr_state.list_reg_open = -1;
+    pvr_state.list_reg_open = PVR_LIST_NONE;
 
     return 0;
 }
 
 int pvr_prim(const void *data, size_t size) {
     /* Check to make sure we can do this */
-    if(PVR_DEBUG && pvr_state.list_reg_open == -1) {
+    if(PVR_DEBUG && pvr_state.list_reg_open == PVR_LIST_NONE) {
         dbglog(DBG_WARNING, "pvr_prim: attempt to submit to unopened list\n");
         return -1;
     }
@@ -292,15 +286,6 @@ int pvr_list_prim(pvr_list_t list, const void *data, size_t size) {
     return 0;
 }
 
-void pvr_dr_init(pvr_dr_state_t *vtx_buf_ptr) {
-    *vtx_buf_ptr = 0;
-    pvr_state.dr_used = 1;
-}
-
-void pvr_dr_finish(void) {
-    pvr_state.dr_used = 0;
-}
-
 int pvr_list_flush(pvr_list_t list) {
     (void)list;
 
@@ -314,16 +299,10 @@ int pvr_list_flush(pvr_list_t list) {
    you have not started a scene already. */
 int pvr_scene_finish(void) {
     int i, o;
-    volatile pvr_dma_buffers_t * b;
-
-    /* Release Store Queues if they are used */
-    if(pvr_state.dr_used) {
-        pvr_dr_finish();
-    }
+    volatile pvr_dma_buffers_t *b;
 
     // If we're in DMA mode, then this works a little differently...
     if(pvr_state.dma_mode) {
-        // DBG(("pvr_scene_finish(dma -> %d)\n", pvr_state.ram_target));
         // If any enabled lists are empty, fill them with a blank polyhdr. Also
         // add a zero-marker to the end of each list.
         b = pvr_state.dma_buffers + pvr_state.ram_target;
@@ -374,7 +353,7 @@ int pvr_scene_finish(void) {
     }
     else {
         /* If a list was open, close it */
-        if(pvr_state.list_reg_open != -1)
+        if(pvr_state.list_reg_open != PVR_LIST_NONE)
             pvr_list_finish();
 
         /* If any lists weren't submitted, then submit blank ones now */
@@ -400,7 +379,7 @@ int pvr_wait_ready(void) {
     flags = irq_disable();
 
     if(pvr_state.ta_busy)
-        t = genwait_wait((void *)&pvr_state.ta_busy, "PVR wait ready", 100, NULL);
+        t = genwait_wait((void *)&pvr_state.ta_busy, "PVR wait ready", 100);
 
     irq_restore(flags);
 
@@ -438,7 +417,7 @@ int pvr_wait_render_done(void) {
     irq_disable_scoped();
 
     if(pvr_state.render_busy)
-        t = genwait_wait((void *)&pvr_state.render_busy, "PVR wait render done", 100, NULL);
+        t = genwait_wait((void *)&pvr_state.render_busy, "PVR wait render done", 100);
 
     return t;
 }

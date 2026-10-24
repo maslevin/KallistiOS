@@ -5,11 +5,13 @@
 
 */
 
-#include <sys/reent.h>
+#include <reent.h>
 #include <errno.h>
 
-int _wait_r(struct _reent * reent, int * status) {
+int _wait_r(struct _reent *reent, int *status) {
+    (void)reent;
     (void)status;
-    reent->_errno = EAGAIN;
+
+    errno = ECHILD;
     return -1;
 }

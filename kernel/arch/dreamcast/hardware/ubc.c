@@ -5,20 +5,19 @@
 */
 
 #include <dc/ubc.h>
-
-#include <arch/memory.h>
-#include <arch/irq.h>
+#include <dc/memory.h>
 
 #include <kos/dbglog.h>
+#include <kos/irq.h>
 
 #include <string.h>
 #include <assert.h>
 
 /* Macros for accessing SFRs common to both channels by index */
-#define BAR(o)  (*((vuint32 *)(uintptr_t)(SH4_REG_UBC_BARA  + (unsigned)(o) * 0xc))) /* Address */
-#define BASR(o) (*((vuint8  *)(uintptr_t)(SH4_REG_UBC_BASRA + (unsigned)(o) * 0x4))) /* ASID */
-#define BAMR(o) (*((vuint8  *)(uintptr_t)(SH4_REG_UBC_BAMRA + (unsigned)(o) * 0xc))) /* Address Mask */
-#define BBR(o)  (*((vuint16 *)(uintptr_t)(SH4_REG_UBC_BBRA  + (unsigned)(o) * 0xc))) /* Bus Cycle */
+#define BAR(o)  (*((volatile uint32_t *)(uintptr_t)(SH4_REG_UBC_BARA  + (unsigned)(o) * 0xc))) /* Address */
+#define BASR(o) (*((volatile uint8_t  *)(uintptr_t)(SH4_REG_UBC_BASRA + (unsigned)(o) * 0x4))) /* ASID */
+#define BAMR(o) (*((volatile uint8_t  *)(uintptr_t)(SH4_REG_UBC_BAMRA + (unsigned)(o) * 0xc))) /* Address Mask */
+#define BBR(o)  (*((volatile uint16_t *)(uintptr_t)(SH4_REG_UBC_BBRA  + (unsigned)(o) * 0xc))) /* Bus Cycle */
 
 /* Macros for accessing individual, channel-specific SFRs */
 #define BARA  (BAR(ubc_channel_a))              /**< Break Address A */
@@ -29,9 +28,9 @@
 #define BASRB (BASR(ubc_channel_b))             /**< Break ASID B */
 #define BAMRB (BAMR(ubc_channel_b))             /**< Break Address Mask B */
 #define BBRB  (BBR(ubc_channel_b))              /**< Break Bus Cycle B */
-#define BDRB  (*((vuint32 *)SH4_REG_UBC_BDRB))  /**< Break Data B */
-#define BDMRB (*((vuint32 *)SH4_REG_UBC_BDMRB)) /**< Break Data Mask B */
-#define BRCR  (*((vuint16 *)SH4_REG_UBC_BRCR))  /**< Break Control */
+#define BDRB  (*((volatile uint32_t *)SH4_REG_UBC_BDRB))  /**< Break Data B */
+#define BDMRB (*((volatile uint32_t *)SH4_REG_UBC_BDMRB)) /**< Break Data Mask B */
+#define BRCR  (*((volatile uint16_t *)SH4_REG_UBC_BRCR))  /**< Break Control */
 
 /* BASR Fields */
 #define BASM            (1 << 2)             /* No ASID (1), use ASID (0) */
@@ -76,7 +75,7 @@ static struct ubc_channel_state {
 } channel_state[ubc_channel_count] = { 0 };
 
 /* Translates ubc_access_t to BBR.ID field format. */
-inline static uint8_t get_access_mask(ubc_access_t access) {
+inline static uint8_t __pure get_access_mask(ubc_access_t access) {
     switch(access) {
     case ubc_access_either:
         return 0x3;
@@ -86,7 +85,7 @@ inline static uint8_t get_access_mask(ubc_access_t access) {
 }
 
 /* Translates ubc_rw_t to BBR.RW field format. */
-inline static uint8_t get_rw_mask(ubc_rw_t rw) {
+inline static uint8_t __pure get_rw_mask(ubc_rw_t rw) {
     switch(rw) {
     case ubc_rw_either:
         return 0x3;
@@ -96,7 +95,7 @@ inline static uint8_t get_rw_mask(ubc_rw_t rw) {
 }
 
 /* Translates ubc_address_mask_t to BASR.BAM field format. */
-inline static uint8_t get_address_mask(ubc_address_mask_t addr_mask) {
+inline static uint8_t __pure get_address_mask(ubc_address_mask_t addr_mask) {
     switch(addr_mask) {
         case ubc_address_mask_all:
             return 3;

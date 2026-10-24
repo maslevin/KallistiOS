@@ -84,15 +84,13 @@ static void kb_test(cursor_t *cursor) {
 static void on_key_event(maple_device_t *dev, kbd_key_t key,
                          key_state_t state, kbd_mods_t mods,
                          kbd_leds_t leds, void *user_data) {
-    /* Retrieve keyboard state from maple device. */
-    kbd_state_t *kbd_state = kbd_get_state(dev);
     /* Fetch cursor from generic userdata pointer. */
     cursor_t *cursor = user_data;
 
     /* Print keyboard address + key ID and state change type. */
     printf("[%c%u] %c: %s\n",
            'A' + dev->port, dev->unit,
-           kbd_key_to_ascii(key, 1, mods, leds),
+           kbd_key_to_ascii(key, ((kbd_state_t *)dev->status)->region, mods, leds),
            state.value == KEY_STATE_CHANGED_DOWN? "PRESSED" : "RELEASED");
 
     /* Check whether the RETURN key was pressed (but not held): */
@@ -112,7 +110,7 @@ int main(int argc, char **argv) {
     cursor_t cursor = {
         .x = MARGIN_HORIZONTAL,
         .y = MARGIN_VERTICAL + BFONT_HEIGHT,
-        .m = ERRORCHECK_MUTEX_INITIALIZER
+        .m = MUTEX_INITIALIZER
     };
 
     for(y = 0; y < SCREEN_HEIGHT; y++)

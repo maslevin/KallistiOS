@@ -7,13 +7,15 @@
 
 #include <dc/maple.h>
 #include <kos/thread.h>
+#include <kos/regfield.h>
+#include <assert.h>
 
 /* Return the number of connected devices */
 int maple_enum_count(void) {
-    int p, u, cnt;
+    size_t cnt = 0;
 
-    for(cnt = 0, p = 0; p < MAPLE_PORT_COUNT; p++)
-        for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; p++)
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; u++) {
             if(maple_dev_valid(p,u))
                 cnt++;
         }
@@ -22,7 +24,7 @@ int maple_enum_count(void) {
 }
 
 /* Return a raw device info struct for the given device */
-maple_device_t * maple_enum_dev(int p, int u) {
+maple_device_t *maple_enum_dev(int p, int u) {
     maple_device_t *rv = maple_state.ports[p].units[u];
     if(rv && rv->valid)
         return rv;
@@ -30,13 +32,11 @@ maple_device_t * maple_enum_dev(int p, int u) {
 }
 
 /* Return the Nth device of the requested type (where N is zero-indexed) */
-maple_device_t * maple_enum_type(int n, uint32 func) {
-    int p, u;
-    maple_device_t *dev;
+maple_device_t *maple_enum_type(size_t n, uint32_t func) {
 
-    for(p = 0; p < MAPLE_PORT_COUNT; p++) {
-        for(u = 0; u < MAPLE_UNIT_COUNT; u++) {
-            dev = maple_enum_dev(p, u);
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; p++) {
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; u++) {
+            maple_device_t *dev = maple_enum_dev(p, u);
 
             if(dev != NULL && (dev->info.functions & func)) {
                 if(!n) return dev;
@@ -51,40 +51,29 @@ maple_device_t * maple_enum_type(int n, uint32 func) {
 
 /* Return the Nth device that is of the requested type and supports the list of
    capabilities given. */
-maple_device_t * maple_enum_type_ex(int n, uint32 func, uint32 cap) {
-    int p, u, d;
-    maple_device_t *dev;
-    uint32 f, tmp;
+maple_device_t *maple_enum_type_ex(size_t n, uint32_t func, uint32_t cap) {
+    /* If func is 0, there can be no match (and it's UB for clz below),
+       and it doesn't work correctly for multiple/ANY func. */
+    assert_msg(__builtin_popcount(func) == 1, "func must be a single MAPLE_FUNC_ value");
 
-    for(p = 0; p < MAPLE_PORT_COUNT; ++p) {
-        for(u = 0; u < MAPLE_UNIT_COUNT; ++u) {
-            dev = maple_enum_dev(p, u);
+    /* Create a mask that leaves only the bits above func. */
+    uint32_t funcmask = ~GENMASK(31 - __builtin_clz(func), 0);
+
+    for(size_t p = 0; p < MAPLE_PORT_COUNT; ++p) {
+        for(size_t u = 0; u < MAPLE_UNIT_COUNT; ++u) {
+            maple_device_t *dev = maple_enum_dev(p, u);
 
             /* If the device supports the function code we passed in, check
                if it supports the capabilities that the user requested. */
             if(dev != NULL && (dev->info.functions & func)) {
-                f = dev->info.functions;
-                d = 0;
-                tmp = func;
 
                 /* Figure out which function data we want to look at. Function
                    data entries are arranged by the function code, most
-                   significant bit first. This is really not pretty, and is
-                   rather inefficient, but its the best I could think of off the
-                   top of my head (i.e, replace me later). */
-                while(tmp != 0x80000000) {
-                    if(f & 0x80000000) {
-                        ++d;
-                    }
+                   significant bit first. So we count the bits above func. */
+                int d = __builtin_popcount(dev->info.functions & funcmask);
 
-                    f <<= 1;
-                    tmp <<= 1;
-                }
-
-                /* Check if the function data for the function type checks out
-                   with what it should be. */
-                cap = ((cap >> 24) & 0xFF) | ((cap >> 8) & 0xFF00) |
-                      ((cap & 0xFF00) << 8) | ((cap & 0xFF) << 24);
+                /* Ensure that the result is in-bounds */
+                assert((d >= 0) && (d < 3));
 
                 if((dev->info.function_data[d] & cap) == cap) {
                     if(!n)
@@ -99,16 +88,12 @@ maple_device_t * maple_enum_type_ex(int n, uint32 func, uint32 cap) {
     return NULL;
 }
 
-/* Get the status struct for the requested maple device; wait until it's
-   valid before returning. Cast to the appropriate type you're expecting. */
-void * maple_dev_status(maple_device_t *dev) {
-    /* The device must be valid, and must get periodic updates. */
-    if(!dev || !dev->valid || !dev->drv || !dev->drv->periodic)
+/* Get the status struct for the requested maple device.
+   Cast to the appropriate type you're expecting. */
+void *maple_dev_status(maple_device_t *dev) {
+    /* The device must be valid. */
+    if(!dev || !dev->valid || !dev->drv)
         return NULL;
-
-    /* Waits until the first DMA happens: crude but effective (replace me later) */
-    while(!dev->status_valid)
-        thd_pass();
 
     /* Cast and return the status buffer */
     return dev->status;

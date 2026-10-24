@@ -17,7 +17,7 @@
 #ifndef __ARCH_DMAC_H
 #define __ARCH_DMAC_H
 
-#include <sys/cdefs.h>
+#include <kos/cdefs.h>
 __BEGIN_DECLS
 
 #include <stdint.h>
@@ -140,7 +140,7 @@ typedef struct dma_config {
     dma_addrmode_t src_mode, dst_mode;  /**< Source/destination address mode. */
     dma_transmitmode_t transmit_mode;   /**< DMA Transfer transmit mode. */
     dma_callback_t callback;            /**< Optional callback function for
-					     end-of-transfer notification. */
+                                             end-of-transfer notification. */
 } dma_config_t;
 
 /** \brief   DMA address.
@@ -160,7 +160,7 @@ typedef uint32_t dma_addr_t;
     \param  hw_addr         The hardware address.
     \return                 The converted DMA address.
 */
-dma_addr_t hw_to_dma_addr(uintptr_t hw_addr);
+dma_addr_t __pure2 hw_to_dma_addr(uintptr_t hw_addr);
 
 /** \brief   Prepare a source memory buffer for a DMA transfer.
     \ingroup dmac

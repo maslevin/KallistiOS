@@ -13,10 +13,10 @@ ifneq ($(KOS_SUBARCH), naomi)
 endif
 
 # System Calls
-OBJS += syscalls.o syscall_font.o
+OBJS += syscalls.o syscall_font.o dcload.o dcload_syscalls.o dcload_syscalls_net.o
 
 # G2
-OBJS += g2dma.o
+OBJS += g2dma.o rtc.o
 
 # Sound
 OBJS += spu.o
@@ -25,10 +25,10 @@ OBJS += spu.o
 OBJS += asic.o g2bus.o
 
 # Video-related
-OBJS += video.o vblank.o
+OBJS += video.o vblank.o elan.o
 
 # CPU-related
-OBJS += sq.o sq_fast_cpy.o scif.o sci.o ubc.o dmac.o
+OBJS += sq.o sq_fast_cpy.o scif.o sci.o ubc.o dmac.o wdt.o
 
 # SPI device support
 OBJS += scif-spi.o sd.o

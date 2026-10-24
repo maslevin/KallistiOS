@@ -3,6 +3,7 @@
    aica.c
    (c)2000-2002 Megan Potter
    (c)2024 Stefanos Kornilios Mitsis Poiitidis
+   (c)2026 Ruslan Rostovtsev
 
    ARM support routines for using the wavetable channels
 */
@@ -11,13 +12,26 @@
 #include "aica.h"
 
 extern volatile aica_channel_t *chans;
+extern void arm_fiq_enable(void);
 
 void aica_init(void) {
     int i, j;
 
-    /* Initialize AICA channels */
-    SNDREG32(0x2800) = 0x0000;
+    /* SCIEB/MCIEB: mask all interrupt sources during setup. */
+    SNDREG32(0x289C) = 0;
+    SNDREG32(0x28B4) = 0;
+    /* SCIRE/MCIRE: acknowledge pending Sound/Main CPU interrupts. */
+    SNDREG32(0x28A4) = 0x7FF;
+    SNDREG32(0x28BC) = 0x7FF;
+    /* SCILV0/1/2: deliver AICA events on FIQ (used by fiq_timer in crt0.s). */
+    SNDREG32(0x28A8) = 0x18;
+    SNDREG32(0x28AC) = 0x50;
+    SNDREG32(0x28B0) = 0x08;
 
+    /* Drop master volume while channel registers are cleared. */
+    SNDREG8(0x2800) = 0;
+
+    /* Initialize AICA channels */
     for(i = 0; i < 64; i++) {
         CHNREG32(i, 0) = 0x8000;
 
@@ -27,15 +41,23 @@ void aica_init(void) {
         CHNREG32(i, 20) = 0x1f;
     }
 
-    SNDREG32(0x2800) = 0x000f;
+    /* Restore default mixer routing after channel reset. */
+    SNDREG8(0x2800) = 0x0f;
+    /* Timer A reload (same as crt0.s). */
+    SNDREG32(0x2890) = 256 - (44100 / 4410);
+    /* SCIEB bit 6: unmask Timer A as the sole FIQ source. */
+    SNDREG32(0x289C) = 0x40;
+
+    /* Unmask FIQ in CPSR once Timer A and SCILV are configured. */
+    arm_fiq_enable();
 }
 
 /* Translates a volume from linear form to logarithmic form (required by
    the AICA chip
 
     Calculated by
-        for (int i = 0; i < 256; i++)
-            if (i == 0)
+        for(int i = 0; i < 256; i++)
+            if(i == 0)
                 logs[i] = 255;
             else
                 logs[i] = 16.0 * log2(255.0 / i);

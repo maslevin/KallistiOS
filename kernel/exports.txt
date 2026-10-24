@@ -36,7 +36,6 @@ ftell
 fflush
 rewind
 fputc
-dbglog
 sprintf
 vsprintf
 
@@ -58,6 +57,8 @@ strlen
 
 # Misc
 abs
+__stack_chk_fail
+__stack_chk_guard
 # __error
 
 ######################################
@@ -123,7 +124,6 @@ net_input_set_target
 net_get_if_list
 
 # Threads
-cond_create
 cond_destroy
 cond_wait_timed
 cond_wait
@@ -133,14 +133,11 @@ genwait_wait
 genwait_wake_cnt
 genwait_wake_all
 genwait_wake_one
-mutex_create
 mutex_destroy
-mutex_lock
 mutex_lock_timed
 mutex_trylock
 mutex_is_locked
 mutex_unlock
-sem_create
 sem_destroy
 sem_wait
 sem_wait_timed
@@ -180,30 +177,22 @@ thd_block_now
 #library_open
 #library_close
 
-# Cache management
-icache_flush_range
-dcache_inval_range
-dcache_flush_range
-dcache_purge_range
-dcache_purge_all
-
 # Low-level debug I/O
+dbglog_level
+dbglog_set_level
 dbgio_set_irq_usage
 dbgio_enable
 dbgio_disable
 dbgio_dev_select
 dbgio_dev_get
-dbgio_write
 dbgio_flush
 dbgio_write_buffer
 dbgio_write_buffer_xlat
 dbgio_write_str
-dbgio_read
 dbgio_read_buffer
 dbgio_printf
 
 # Interrupt / Exception handling
-irq_force_return
 irq_disable
 irq_enable
 irq_restore
@@ -215,44 +204,17 @@ irq_get_global_handler
 irq_set_context
 irq_get_context
 
-# Kernel image replacement
-arch_exec_at
-arch_exec
-
 # Misc other kernel control
 arch_exit
 arch_abort
 
-# MMU handling
-mmu_reset_itlb
-mmu_use_table
-mmu_context_create
-mmu_context_destroy
-mmu_virt_to_phys
-mmu_switch_context
-mmu_page_map
-mmu_copyin
-mmu_copyv
-mmu_map_get_callback
-mmu_map_set_callback
-mmu_init
-mmu_shutdown
-
 # Panic!
 arch_panic
-
-# Real-time clock
-rtc_unix_secs
-rtc_boot_time
 
 # Stack tracing
 arch_stk_trace
 arch_stk_trace_at
 
 # Timers
-timer_spin_sleep
-timer_ms_gettime
-timer_ms_gettime64
-timer_us_gettime64
 timer_primary_set_callback
 timer_primary_wakeup
