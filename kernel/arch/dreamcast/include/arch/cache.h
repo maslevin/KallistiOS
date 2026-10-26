@@ -188,7 +188,11 @@ static inline void arch_dcache_purge_all(void) {
     unsigned int i;
 
     if(__is_defined(__OPTIMIZE_SIZE__)) {
-        volatile uint32_t *dca = (volatile uint32_t *)0xf4000008;
+        /* Non-associative address array writes (bit 3, the A bit, clear): writing 0 to an entry writes a dirty line
+           back and invalidates it. An associative write (0xf4000008) only acts on an entry whose tag matches the
+           written data's, and the tag of 0 never does, so it left every dirty line dirty. The array is addressed by
+           entry number, so this reaches all 512 lines with CCR.OIX set too. */
+        volatile uint32_t *dca = (volatile uint32_t *)0xf4000000;
 
         for (i = 0; i < 512; i++, dca += 8)
             *dca = 0;
@@ -201,6 +205,22 @@ static inline void arch_dcache_purge_all(void) {
             arch_dcache_alloc_line(buf);
             arch_dcache_inval_line(buf);
             buf += 32;
+        }
+
+        /* With CCR.OIX (OCINDEX mode, dcache_toggle_ocindex()) the line index is address bit 25 and bits 12:5, so
+           the buffer above (bit 25 clear) only reaches the half of the cache for bit 25 clear: dirty lines in the
+           other half stayed dirty and valid, and a DMA after a "purge" read stale memory (it corrupted the heap).
+           The same buffer through main RAM's mirror at +0x02000000 (bit 25 set) reaches the other half; its lines
+           are allocated and invalidated, never written, so the alias leaves nothing behind (and on a 32 MB unit,
+           where +0x02000000 is other memory, its lines are likewise only allocated and dropped). */
+        if(*(volatile uint32_t *)0xff00001c & BIT(7)) { /* CCR.OIX (dc/cache.h's CCR_OIX) */
+            buf = (char *)((uintptr_t)buffer | 0x02000000);
+
+            for(i = 0; i < ARCH_CACHE_L1_DCACHE_SIZE / 32; i++) {
+                arch_dcache_alloc_line(buf);
+                arch_dcache_inval_line(buf);
+                buf += 32;
+            }
         }
     }
 }
